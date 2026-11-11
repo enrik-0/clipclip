@@ -28,3 +28,10 @@ Ver `D:\proyectos\test-org-data\board-actions.md`.
 - 19:16 — "Pedir cambios" a `PRODUCT.md`; el PM publica v2 y se aprueba.
 - 19:22 — arranque cerrado; el CEO abre la Iniciativa 1 (historias).
 - 19:3x — backlog aprobado; el CTO descompone en TES-10..TES-22 y Backend empieza.
+
+## Hallazgos de la sesión autónoma (hasta 19:58 UTC)
+- 10. Hueco de instrucciones: nadie creaba la tarea de aprobación del CTO. Corregido (el autor la crea; una tarea de código no termina hasta integrarse en `main`). Tras el cambio el CTO integró en `main` (28 commits).
+- 11. Las revisiones encuentran defectos reales (nombres duplicados por Unicode, token en claro en logs) y el autor los corrige con TDD.
+- 12. Backend trabaja de uno en uno con muchas ejecuciones encoladas: es el cuello de botella.
+- 13. **Estado final: pipeline parado.** Ningún run en curso; tareas 10, 11, 13, 14, 47, 50 en `blocked` (esperan que Backend las cierre tras la integración); Frontend (17-22) sin empezar en `backlog`.
+- Siguiente paso sugerido: despertar a Backend sobre las tareas bloqueadas y comprobar que quien libera el `backlog` de Frontend es el CTO/CEO.
