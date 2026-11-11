@@ -126,6 +126,10 @@ for (const r of ROLES) {
       });
       console.log(`${r.name.padEnd(20)} instrucciones actualizadas`);
     }
+    if ((found.budgetMonthlyCents ?? 0) !== r.budget) {
+      await call("PATCH", `/agents/${found.id}`, { budgetMonthlyCents: r.budget });
+      console.log(`${r.name.padEnd(20)} presupuesto mensual → ${r.budget} (0 = sin tope)`);
+    }
     continue;
   }
   const agent = await call("POST", `/companies/${company.id}/agents`, {
@@ -169,7 +173,8 @@ for (const g of GOALS) {
 }
 
 // ---------------- 4. Gobierno ----------------
-await call("PATCH", `/companies/${company.id}`, { requireBoardApprovalForNewAgents: true });
+// Se trabaja con suscripción: sin tope de gasto en $ (0 = sin tope) para que ningún agente se pause por presupuesto.
+await call("PATCH", `/companies/${company.id}`, { requireBoardApprovalForNewAgents: true, budgetMonthlyCents: 0 });
 console.log("Gobierno: contrataciones nuevas requieren aprobación del board.");
 
 await mkdir(DATA, { recursive: true });

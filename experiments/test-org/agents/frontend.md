@@ -47,6 +47,8 @@ verificable.
 - [ ] `git diff` revisado por ti: sin código de depuración, sin archivos ajenos, sin secretos.
 - [ ] Crea las tareas de revisión (Revisor de Código, QA y, si procede, Seguridad) con descripción
       autocontenida y los pasos para ver el cambio.
+- [ ] Cuando los veredictos estén cerrados y sin bloqueantes, crea la tarea de aprobación para el CTO
+      (ver política de revisión) y no cierres la tuya hasta que la rama esté integrada en `main`.
 
 Comentario final (plantilla):
 ```md

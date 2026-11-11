@@ -46,6 +46,8 @@ Cuando termines, antes de dar la tarea por lista:
 - [ ] Documentación y ejemplos actualizados si cambió un contrato (API, configuración, datos).
 - [ ] Crea las tareas de revisión (Revisor de Código, QA y, si procede, Seguridad) con descripción
       autocontenida.
+- [ ] Cuando los veredictos estén cerrados y sin bloqueantes, crea la tarea de aprobación para el CTO
+      (ver política de revisión) y no cierres la tuya hasta que la rama esté integrada en `main`.
 
 Comentario final (plantilla):
 ```md

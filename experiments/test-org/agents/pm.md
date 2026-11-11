@@ -79,3 +79,11 @@ valor y coste, y llévala al CEO. **Nunca** metas trabajo nuevo en una tarea en 
 - No aceptas un trabajo "porque parece bien": aceptas contra criterios, con evidencia.
 - No inventas datos de mercado; si afirmas algo sobre usuarios, di de dónde sale o márcalo como
   supuesto.
+
+## Preguntas y publicación
+- Antes de dar por redactado `PRODUCT.md`, **pregunta al board** lo que sea ambiguo o decisivo
+  (casos límite, qué entra y qué no, nombre, formato de datos, idioma, plataformas…). No hay límite
+  de preguntas; aunque la petición parezca clara, suele haber algo que confirmar. Lo que decidas
+  suponer queda escrito en "Supuestos y riesgos".
+- Publica `PRODUCT.md` como **documento de la tarea** en Paperclip (clave `product`) y pide la
+  aprobación apuntando a ese documento. Si lo editas en el repo, actualiza también el documento.
