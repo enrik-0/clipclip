@@ -1,0 +1,25 @@
+# Solo PostgreSQL para desarrollo local (sin servidor, sin secretos).
+#
+#   docker compose -f docker/docker-compose.dev-db.yml up -d
+#   DATABASE_URL=postgres://paperclip:paperclip@localhost:5433/paperclip pnpm dev
+#
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: paperclip-dev-db
+    environment:
+      POSTGRES_USER: paperclip
+      POSTGRES_PASSWORD: paperclip
+      POSTGRES_DB: paperclip
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paperclip -d paperclip"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    ports:
+      - "127.0.0.1:${PAPERCLIP_DEV_DB_PORT:-5433}:5432"
+    volumes:
+      - paperclip-dev-pgdata:/var/lib/postgresql/data
+
+volumes:
+  paperclip-dev-pgdata:

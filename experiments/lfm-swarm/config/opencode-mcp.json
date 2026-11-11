@@ -1,0 +1,20 @@
+{
+  "snapshot": false,
+  "autoupdate": false,
+  "share": "disabled",
+  "mcp": {
+    "memory": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-memory@2025.9.25"],
+      "environment": {
+        "MEMORY_FILE_PATH": "D:/proyectos/paperclip-lab-data/shared-memory.jsonl"
+      },
+      "enabled": true
+    },
+    "sequential-thinking": {
+      "type": "local",
+      "command": ["npx", "-y", "@modelcontextprotocol/server-sequential-thinking@2025.7.1"],
+      "enabled": true
+    }
+  }
+}

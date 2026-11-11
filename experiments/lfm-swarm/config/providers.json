@@ -1,0 +1,21 @@
+{
+  "lmstudio": {
+    "npm": "@ai-sdk/openai-compatible",
+    "name": "LM Studio (LFM)",
+    "options": {
+      "baseURL": "http://10.156.90.46:1234/v1"
+    },
+    "models": {
+      "qwen/qwen3-vl-8b": {
+        "name": "Qwen3 VL 8B",
+        "tool_call": true,
+        "limit": { "context": 65536, "output": 8192 }
+      },
+      "lfm3-omni-2b": {
+        "name": "LFM3 Omni 2B",
+        "tool_call": true,
+        "limit": { "context": 128000, "output": 8192 }
+      }
+    }
+  }
+}
