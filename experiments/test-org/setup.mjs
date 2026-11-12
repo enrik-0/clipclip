@@ -39,7 +39,6 @@ const buildAdapterConfig = (r) => ({
   engine: "cli",
   model: r.model,
   ...(r.model.includes("sonnet") ? { effort: "medium" } : {}),
-  maxTurnsPerRun: r.turns,
   timeoutSec: 0,
   graceSec: 30,
   env: { CLAUDE_CONFIG_DIR },
@@ -125,6 +124,13 @@ for (const r of ROLES) {
         baseRevisionId: cur.revisionId ?? cur.revision?.id ?? null,
       });
       console.log(`${r.name.padEnd(20)} instrucciones actualizadas`);
+    }
+    // Sin límite de turnos para nadie: se elimina maxTurnsPerRun si existiera (cambiar el adapterConfig relanza la sonda).
+    const current = await call("GET", `/agents/${found.id}`);
+    // (el PATCH fusiona la configuración: borrar la clave no sirve; 0 = sin `--max-turns`)
+    if (current.adapterConfig && Number(current.adapterConfig.maxTurnsPerRun ?? 0) !== 0) {
+      await call("PATCH", `/agents/${found.id}`, { adapterConfig: { ...current.adapterConfig, maxTurnsPerRun: 0 } });
+      console.log(`${r.name.padEnd(20)} sin límite de turnos → ${await ensureReady(found.id, r.name)}`);
     }
     if ((found.budgetMonthlyCents ?? 0) !== r.budget) {
       await call("PATCH", `/agents/${found.id}`, { budgetMonthlyCents: r.budget });
