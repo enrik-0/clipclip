@@ -35,3 +35,10 @@ Ver `D:\proyectos\test-org-data\board-actions.md`.
 - 12. Backend trabaja de uno en uno con muchas ejecuciones encoladas: es el cuello de botella.
 - 13. **Estado final: pipeline parado.** Ningún run en curso; tareas 10, 11, 13, 14, 47, 50 en `blocked` (esperan que Backend las cierre tras la integración); Frontend (17-22) sin empezar en `backlog`.
 - Siguiente paso sugerido: despertar a Backend sobre las tareas bloqueadas y comprobar que quien libera el `backlog` de Frontend es el CTO/CEO.
+
+## Reanudación (2026-11-12 16:30 Madrid)
+- 14. **Límite de uso de la suscripción**: los runs fallan en segundos con `claude_transient_upstream` ("5-hour limit") y el sistema deja las tareas en `blocked` **sin ningún bloqueo real**. Solución: devolverlas a `todo` (de una en una). Tras restablecerse el límite el flujo se retomó solo.
+- 15. **Memoria del PC (15 GB)**: con el juego y Opera abiertos solo quedaba 1 GB libre y Claude Code mató el servidor y la UI. Arrancar sin UI (`start-dev.ps1 -NoUi`) basta.
+- 16. **El CTO no liberaba el backlog** (frontend) al terminar el backend; hizo falta un aviso del board. Instrucción añadida al CTO ("Mantener el flujo").
+- 17. **QA con `maxTurnsPerRun: 30` se queda corto** para tareas grandes (suite de aceptación: `max_turns_exhausted`; el reintento tardó ~9 min). Pendiente: subir los turnos de todos los agentes (60-80). No se ha aplicado porque cambiar el `adapterConfig` relanza la sonda de verificación, que es intermitente.
+- Backend completo (TES-10..16) revisado por Revisor, QA y Seguridad e integrado en `main` por el CTO (45 commits). Frontend en curso.
