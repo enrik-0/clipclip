@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CONNECTION_INTENT_AGENT_GUIDANCE } from "@paperclipai/shared";
 import {
   readPaperclipRuntimeSkillEntries,
@@ -37,6 +37,7 @@ import {
   sanitizeSshRemoteEnv,
   sanitizeInheritedPaperclipEnv,
   isForbiddenConfigEnvKey,
+  linkPaperclipSkillWithFallback,
   signalRunningProcess,
   shapePaperclipWorkspaceEnvForExecution,
   rewriteWorkspaceCwdEnvVarsForExecution,
@@ -330,6 +331,118 @@ describe("sanitizeSshRemoteEnv", () => {
         },
       ),
     ).toEqual({ PATH: "/explicit/remote/bin" });
+  });
+});
+
+describe("linkPaperclipSkillWithFallback", () => {
+  const denied = (code = "EPERM") =>
+    Object.assign(new Error(`${code}: operation not permitted, symlink`), { code });
+
+  it("uses a plain symlink when the platform allows it", async () => {
+    const types: Array<string | undefined> = [];
+    const onFallback = vi.fn();
+    const mode = await linkPaperclipSkillWithFallback("/src/skill", "/dst/skill", {
+      symlink: async (_source, _target, type) => {
+        types.push(type);
+      },
+      copy: async () => {
+        throw new Error("must not copy");
+      },
+      onFallback,
+    });
+    expect(mode).toBe("symlink");
+    expect(types).toEqual([undefined]);
+    expect(onFallback).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a junction on Windows when symlinks are denied", async () => {
+    const types: Array<string | undefined> = [];
+    const onFallback = vi.fn();
+    const mode = await linkPaperclipSkillWithFallback("C:\\src\\skill", "C:\\dst\\skill", {
+      platform: "win32",
+      symlink: async (_source, _target, type) => {
+        types.push(type);
+        if (type !== "junction") throw denied();
+      },
+      copy: async () => {
+        throw new Error("must not copy");
+      },
+      onFallback,
+    });
+    expect(mode).toBe("junction");
+    expect(types).toEqual([undefined, "junction"]);
+    expect(onFallback).toHaveBeenCalledTimes(1);
+    expect(onFallback.mock.calls[0]?.[0]).toMatchObject({ mode: "junction" });
+  });
+
+  it("copies the skill when both the symlink and the junction are denied", async () => {
+    const copy = vi.fn(async () => undefined);
+    const onFallback = vi.fn();
+    const mode = await linkPaperclipSkillWithFallback("C:\\src\\skill", "C:\\dst\\skill", {
+      platform: "win32",
+      symlink: async () => {
+        throw denied("EACCES");
+      },
+      copy,
+      onFallback,
+    });
+    expect(mode).toBe("copy");
+    expect(copy).toHaveBeenCalledWith("C:\\src\\skill", "C:\\dst\\skill");
+    expect(onFallback).toHaveBeenCalledTimes(1);
+    expect(onFallback.mock.calls[0]?.[0]).toMatchObject({ mode: "copy" });
+  });
+
+  it("skips the junction on non-Windows platforms and copies", async () => {
+    const types: Array<string | undefined> = [];
+    const copy = vi.fn(async () => undefined);
+    const mode = await linkPaperclipSkillWithFallback("/src/skill", "/dst/skill", {
+      platform: "linux",
+      symlink: async (_source, _target, type) => {
+        types.push(type);
+        throw denied("ENOTSUP");
+      },
+      copy,
+    });
+    expect(mode).toBe("copy");
+    expect(types).toEqual([undefined]);
+    expect(copy).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not hide errors that are not permission problems", async () => {
+    const copy = vi.fn(async () => undefined);
+    await expect(
+      linkPaperclipSkillWithFallback("/src/skill", "/dst/skill", {
+        platform: "win32",
+        symlink: async () => {
+          throw Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" });
+        },
+        copy,
+      }),
+    ).rejects.toThrow(/ENOENT/);
+    expect(copy).not.toHaveBeenCalled();
+  });
+
+  it("materializes a real copy of the skill when symlinks are denied", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-skill-link-"));
+    try {
+      const source = path.join(root, "source");
+      const target = path.join(root, "skills", "skill");
+      await fs.mkdir(source, { recursive: true });
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(path.join(source, "SKILL.md"), "# skill\n", "utf8");
+
+      const mode = await linkPaperclipSkillWithFallback(source, target, {
+        platform: "linux",
+        symlink: async () => {
+          throw denied();
+        },
+      });
+
+      expect(mode).toBe("copy");
+      await expect(fs.readFile(path.join(target, "SKILL.md"), "utf8")).resolves.toBe("# skill\n");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });
 

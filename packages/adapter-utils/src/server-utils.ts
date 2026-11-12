@@ -4430,13 +4430,90 @@ export function writePaperclipSkillSyncPreference(
   return next;
 }
 
+export type PaperclipSkillLinkMode = "symlink" | "junction" | "copy";
+
+export interface PaperclipSkillLinkFallbackEvent {
+  mode: Exclude<PaperclipSkillLinkMode, "symlink">;
+  /** The symlink error that made the fallback necessary. */
+  error: unknown;
+}
+
+export interface LinkPaperclipSkillOptions {
+  symlink?: (
+    source: string,
+    target: string,
+    type?: "junction",
+  ) => Promise<void>;
+  copy?: (source: string, target: string) => Promise<unknown>;
+  platform?: NodeJS.Platform;
+  /** Called after a fallback succeeded, so callers can surface it in the run log. */
+  onFallback?: (event: PaperclipSkillLinkFallbackEvent) => void | Promise<void>;
+}
+
+const SKILL_LINK_PERMISSION_ERROR_CODES = new Set([
+  "EPERM",
+  "EACCES",
+  "ENOTSUP",
+  "EOPNOTSUPP",
+]);
+
+function isSkillLinkPermissionError(err: unknown): boolean {
+  const code =
+    err && typeof err === "object" ? (err as { code?: unknown }).code : null;
+  return typeof code === "string" && SKILL_LINK_PERMISSION_ERROR_CODES.has(code);
+}
+
+/**
+ * Makes a skill directory available at `target`. A symlink is preferred, but on
+ * Windows without Developer Mode or elevation `fs.symlink` fails with EPERM, which
+ * would leave the agent without any skill. In that case use a directory junction
+ * (no privilege needed) and, if that is also denied, a real copy. Errors that are
+ * not permission problems are never hidden.
+ */
+export async function linkPaperclipSkillWithFallback(
+  source: string,
+  target: string,
+  options: LinkPaperclipSkillOptions = {},
+): Promise<PaperclipSkillLinkMode> {
+  const symlink =
+    options.symlink ??
+    ((linkSource, linkTarget, type) => fs.symlink(linkSource, linkTarget, type));
+  const copy = options.copy ?? materializePaperclipSkillCopy;
+  const platform = options.platform ?? process.platform;
+
+  let symlinkError: unknown;
+  try {
+    await symlink(source, target);
+    return "symlink";
+  } catch (err) {
+    if (!isSkillLinkPermissionError(err)) throw err;
+    symlinkError = err;
+  }
+
+  if (platform === "win32") {
+    try {
+      await symlink(source, target, "junction");
+      await options.onFallback?.({ mode: "junction", error: symlinkError });
+      return "junction";
+    } catch (err) {
+      if (!isSkillLinkPermissionError(err)) throw err;
+    }
+  }
+
+  await copy(source, target);
+  await options.onFallback?.({ mode: "copy", error: symlinkError });
+  return "copy";
+}
+
 export async function ensurePaperclipSkillSymlink(
   source: string,
   target: string,
-  linkSkill: (source: string, target: string) => Promise<void> = (
+  linkSkill: (source: string, target: string) => Promise<void> = async (
     linkSource,
     linkTarget,
-  ) => fs.symlink(linkSource, linkTarget),
+  ) => {
+    await linkPaperclipSkillWithFallback(linkSource, linkTarget);
+  },
 ): Promise<"created" | "repaired" | "skipped"> {
   const existing = await fs.lstat(target).catch(() => null);
   if (!existing) {
