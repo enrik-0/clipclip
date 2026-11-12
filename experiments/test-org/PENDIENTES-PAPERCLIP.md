@@ -17,6 +17,15 @@ scripts); estos cambios se harán **después**. Las referencias a archivos son d
   aquí y se **verificó** (TES-75: el agente ve e invoca `paperclip`); el cambio sigue siendo necesario para otros
   equipos Windows.
 
+## 1b. Skill `paperclip`: quitar el `Co-Authored-By` y cualquier atribución a una IA  ← anotado a petición del usuario
+- **Dónde:** `skills/paperclip/SKILL.md`, línea ~630, regla "**Commit Co-author**": obliga a terminar cada commit con
+  `Co-Authored-By: Paperclip <noreply@paperclip.ing>`. Es la única aparición en `skills/`, `server/src/onboarding-assets`
+  y `packages/skills-catalog`.
+- **Cambio propuesto:** eliminar esa regla y **añadir la contraria**: los agentes no añaden ninguna atribución a una IA
+  (ni `Co-Authored-By`, ni "Generated with…", ni firmas de modelo o de Paperclip) en commits, PRs, comentarios ni documentos.
+- **Sin parches provisionales** (decisión del usuario): se hará directamente en la skill cuando se modifique Paperclip.
+  Mientras tanto los agentes seguirán añadiendo el `Co-Authored-By` en los commits nuevos.
+
 ## 2. Sonda de verificación de agentes (`claude-local/src/server/test.ts`, `probe-env.ts`)
 - Lanza `claude` con un **entorno casi vacío** (sin `HOME`/`USERPROFILE`/`PATH`): en Windows no encuentra el login.
 - Exige que la respuesta contenga la palabra `hello`: **falla si Claude responde en español** (configuración del usuario).
