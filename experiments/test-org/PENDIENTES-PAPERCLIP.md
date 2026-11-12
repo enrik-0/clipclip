@@ -46,7 +46,16 @@ scripts); estos cambios se harán **después**. Las referencias a archivos son d
 - Un **comentario** solo despierta al asignado. **No es un fallo: es el diseño actual** (una tarea se considera
   todavía no lista para trabajarse) y el usuario tiene **features previstas** sobre esto. Consecuencia práctica: las
   preguntas entre agentes deben hacerse con una tarea asignada o un bloqueo con responsable (instrucción de la org).
-  Un comentario del board sobre una tarea con una confirmación pendiente la **caduca** (por confirmar si también es diseño).
+- **Un comentario del board caduca una confirmación pendiente → NO es lo que quiere el usuario (decisión 2026-11-12).**
+  Hoy es comportamiento *documentado*: las confirmaciones ligadas a un documento (`target`) llevan por defecto
+  `supersedeOnUserComment: true` y un comentario humano las cancela con `outcome: "superseded_by_comment"`
+  (observado en TES-9: la confirmación del backlog caducó al comentar). Cambio propuesto: que un comentario **no**
+  cancele la confirmación (defecto `false`, o exigir que se active explícitamente), y actualizar la documentación.
+  - Código: `server/src/services/issue-thread-interactions.ts` — `shouldSupersedeInteractionOnUserComment` (~l.902),
+    `expireRequestConfirmationsSupersededByComment` (~l.4881) y el defecto del payload al crear (~l.917-941).
+  - Skill/documentación: `skills/paperclip/SKILL.md` (l.374 y el ejemplo de l.469) y
+    `skills/paperclip/references/api-reference.md` (l.1058, 1085, 1132).
+  - Observación: en TES-3 el PM creó la confirmación con `false` y no caducó; en TES-9 quedó en `true`.
 - Tareas creadas **sin asignado** (p. ej. la aprobación del CTO) no se ejecutan y nada avisa.
 - Tras un fallo por límite de uso (`claude_transient_upstream`) las tareas quedan en `blocked` **sin ningún
   bloqueo real** y no se retoman solas al restablecerse el límite.
