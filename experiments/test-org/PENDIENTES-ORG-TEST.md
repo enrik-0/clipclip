@@ -32,3 +32,19 @@ Los cambios de código están en `PENDIENTES-PAPERCLIP.md`. La numeración (#) r
 ## Procedimiento operativo mientras tanto
 - Tras un fallo por límite de uso, devolver a `todo` las tareas que queden `blocked` sin bloqueo real (de una en una).
 - Los commits nuevos llevarán el `Co-Authored-By: Paperclip` hasta cambiar la skill (ver PENDIENTES-PAPERCLIP 1b).
+
+## Tareas de UX por crear en Paperclip (revisión en Chrome de la noche del 12-13/11; el servidor estaba parado)
+Proyecto `Software`, como lo haría un usuario (una por punto, con la idea, sin explicar el flujo):
+1. El primer miembro aparece marcado por defecto como participante del gasto.
+2. El mensaje de error de duplicado de miembro persiste y el campo conserva el texto rechazado.
+3. El mensaje de éxito del gasto anterior sigue visible al empezar otro gasto.
+4. Al editar un gasto a partes iguales el formulario se abre en modo "Importes por persona".
+5. "Entre: …" lista a un participante con parte 0 en un reparto por importes.
+6. Casillas y radios de 24 px (menos de 44 px táctiles).
+7. Probar en un móvil real (la ventana de Chrome no se pudo redimensionar).
+
+## Fase pendiente
+- **Filial de vídeo** (no ejecutada): arrancar el servidor sin UI y dar al CEO solo la idea; `ffmpeg` ya está instalado. No
+  aprobar ninguna publicación real (no hay canal).
+- Residuo de tests en tu carpeta personal: `C:\Users\villa\.paperclip\` (1 archivo, creado por los tests de claude-local);
+  se puede borrar a mano.

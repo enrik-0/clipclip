@@ -13,6 +13,8 @@ scripts); estos cambios se harán **después**. Las referencias a archivos son d
 - **Cambio propuesto:** al fallar el symlink, usar una **junction** (`fs.symlinkSync(src, dst, "junction")`
   funciona sin privilegios) o **copiar** la carpeta. La vía ACP ya copia (`materializePaperclipSkillCopy`).
   Además, que el fallo sea **visible**: aviso en la UI/estado del run o check en la verificación del agente.
+- **HECHO en la rama `fix/skill-symlink-fallback`** (commit `d9ad22089e`, fork `enrik-0/clipclip`): symlink → junction
+  (Windows) → copia, con aviso en el log del run; arregla también pi-local, hermes y ACP. Falta revisar/abrir PR si se quiere.
 - **Estado del entorno:** el usuario ya activó el Modo desarrollador (2026-11-12), con lo que el symlink funciona
   aquí y se **verificó** (TES-75: el agente ve e invoca `paperclip`); el cambio sigue siendo necesario para otros
   equipos Windows.
@@ -27,12 +29,28 @@ scripts); estos cambios se harán **después**. Las referencias a archivos son d
   Mientras tanto los agentes seguirán añadiendo el `Co-Authored-By` en los commits nuevos.
 
 ## 2. Sonda de verificación de agentes (`claude-local/src/server/test.ts`, `probe-env.ts`)
-- Lanza `claude` con un **entorno casi vacío** (sin `HOME`/`USERPROFILE`/`PATH`): en Windows no encuentra el login.
+- ~~Lanza `claude` con un entorno casi vacío y en Windows no encuentra el login~~ → **descartado (2026-11-13)**: con `env -i`
+  y sin `CLAUDE_CONFIG_DIR`, Claude sí se autentica (el home se resuelve por la API de Windows).
 - Exige que la respuesta contenga la palabra `hello`: **falla si Claude responde en español** (configuración del usuario).
-- Es **intermitente** y **oculta su salida** (solo `unexpected_output`): añadir un modo de diagnóstico.
+  **Hecho en la rama `fix/agent-probe-language-neutral`** (commit `550f5dabd2`, fork `enrik-0/clipclip`): ambos carriles
+  piden "una sola palabra, en inglés: hello" y el hint fijo explica el idioma. Pendiente en otros adaptadores con el mismo
+  patrón: opencode-local, pi-local, gemini-local, kimi-local, cursor-local.
+- Es **intermitente** (sin explicar) y **oculta su salida** (solo `unexpected_output`). Un test existente prohíbe añadir
+  `detail` a ese check, así que un diagnóstico requeriría cambiar esa decisión de diseño.
 - **Cualquier cambio del `adapterConfig`** (incluso `graceSec`) relanza la verificación; desde `verifying`,
   `pause` + `resume` vuelve a `verifying` (no hay forma legítima de continuar sin pasar la sonda).
 - Rodeo actual: `CLAUDE_CONFIG_DIR` + `--append-system-prompt` en el `adapterConfig`.
+
+## 2b. Portabilidad de los tests a Windows (medido en el baseline `6dd8611a2f`, 2026-11-13)
+- `claude-local/src/server/test.probe.test.ts`: **18 de 23 fallan** (el montaje del sandbox falso acaba en
+  `claude_managed_config_dir_failed`; los tests suponen un host POSIX).
+- `claude-local/src/server/probe-env.test.ts`: **1 de 6 falla** ("resolves claude from the trusted PATH": el ejecutable falso
+  no lleva extensión y Windows resuelve con `PATHEXT`).
+- Los tests **escriben en el HOME real** (`~/.paperclip/instances/default/companies/company-1/claude-config-seed/…`): deberían
+  usar un directorio temporal/aislado.
+- `pnpm verify --explain` tarda ~329 s y termina con código 2 al tocar `adapter-utils` (esperado: verificación más amplia en CI).
+- Con Modo desarrollador: `pnpm install --frozen-lockfile` OK (0 `EPERM`), `postinstall` de symlinks OK, typecheck de
+  `adapter-utils` y `adapter-claude-local` OK.
 
 ## 3. Arranque de desarrollo en Windows
 - `scripts/agent-preflight.mjs`: `spawnSync pnpm ENOENT` (no resuelve `pnpm.cmd`).

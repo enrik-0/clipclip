@@ -44,3 +44,9 @@ Ver `D:\proyectos\test-org-data\board-actions.md`.
 - Backend completo (TES-10..16) revisado por Revisor, QA y Seguridad e integrado en `main` por el CTO (45 commits). Frontend en curso.
 - 18. **El backlog no se libera solo**: tras integrar trabajo, el CTO no pasaba a `todo` las tareas siguientes (un despertar sin tarea no hace nada: su bandeja solo contiene sus propias tareas). Hizo falta un mensaje del board en TES-9 (liberó 18, 19, 20, 22) y, para TES-21, pasarla a `todo` a mano. Idea de mejora: que el CTO cree las tareas siguientes ya en `todo` cuando sus dependencias estén integradas, o que sea el autor quien pida la siguiente.
 - Estado (17:40 Madrid): backend y frontend HU-1..HU-5 integrados (`main` con 54 commits); HU-6 frontend (TES-21) y suite de aceptación (TES-22) en revisión/QA.
+
+## Noche del 12-13/11/2026 (plan autónomo)
+Ver `NOCHE-INFORME.md`. Baseline congelado (etiquetas en el fork, copia de Postgres de 31 MB, etiqueta `baseline-v1`); revisión de la
+UI de Cuentas Claras en Chrome real sin fallos funcionales; dos ramas de desarrollo en el fork (`fix/skill-symlink-fallback`,
+`fix/agent-probe-language-neutral`); el diagnóstico "entorno vacío rompe el login" resultó falso (la causa es el idioma). La filial
+de vídeo no se ejecutó: el servidor de Paperclip había sido cerrado por el sistema por falta de memoria.
