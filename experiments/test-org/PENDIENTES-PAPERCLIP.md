@@ -43,8 +43,10 @@ scripts); estos cambios se harán **después**. Las referencias a archivos son d
 ## 4. API y flujo de trabajo
 - `PATCH /api/agents/:id` **fusiona** `adapterConfig`: no permite borrar claves (hay que poner un valor neutro,
   p. ej. `maxTurnsPerRun: 0`).
-- Un **comentario** en una tarea solo despierta al asignado: preguntar a otro agente por comentario no funciona.
-  Un comentario del board sobre una tarea con una confirmación pendiente la **caduca**.
+- Un **comentario** solo despierta al asignado. **No es un fallo: es el diseño actual** (una tarea se considera
+  todavía no lista para trabajarse) y el usuario tiene **features previstas** sobre esto. Consecuencia práctica: las
+  preguntas entre agentes deben hacerse con una tarea asignada o un bloqueo con responsable (instrucción de la org).
+  Un comentario del board sobre una tarea con una confirmación pendiente la **caduca** (por confirmar si también es diseño).
 - Tareas creadas **sin asignado** (p. ej. la aprobación del CTO) no se ejecutan y nada avisa.
 - Tras un fallo por límite de uso (`claude_transient_upstream`) las tareas quedan en `blocked` **sin ningún
   bloqueo real** y no se retoman solas al restablecerse el límite.

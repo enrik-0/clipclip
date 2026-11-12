@@ -47,7 +47,7 @@ Los costes en $ no se consideran (suscripción). Ningún agente tiene límite de
    **RESUELTO (2026-11-12):** con el Modo desarrollador activado y el servidor reiniciado, una tarea mínima a QA (TES-75) confirma que ve `paperclip`, `complain` y `suggestion-box`, que `paperclip` es invocable (`Launching skill: paperclip`) y que el bundle del run contiene los 3 symlinks. *Pendiente de comprobar:* que los commits nuevos lleven el `Co-Authored-By: Paperclip` y por qué QA recibe 3 de las 7 skills asignadas a otros agentes.
    **Efecto aparte (no investigado):** los agentes cargan además las skills y plugins personales del usuario (herencia del `HOME`/`~/.claude`); ensucia el contexto de cada run.
 2. **El backlog no se libera solo.** Tras integrar, el CTO no pasaba las tareas siguientes a `todo`; hizo falta un mensaje del board o moverlas a mano (TES-17..22). Instrucción añadida al CTO; sigue sin dispararse sin un evento.
-3. **Una pregunta por comentario no despierta a nadie.** QA pidió decisiones al CTO y al PM en un comentario de su propia tarea (TES-22) y quedó bloqueada; un comentario solo despierta al asignado. Debe usar una tarea o un bloqueo con responsable.
+3. **Una pregunta por comentario no despierta a nadie.** QA pidió decisiones al CTO y al PM en un comentario de su propia tarea (TES-22) y quedó bloqueada; un comentario solo despierta al asignado. **Es el diseño actual de Paperclip, no un fallo** (el usuario tiene features previstas); la org debe usar una tarea o un bloqueo con responsable.
 4. **Tarea de aprobación creada sin asignar** (TES-73): nadie la ejecutó hasta que se asignó al CTO.
 5. **Tras el límite de uso, las tareas quedan `blocked` sin ningún bloqueo real** y no se retoman solas; hay que devolverlas a `todo`.
 
