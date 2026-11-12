@@ -14,7 +14,8 @@ scripts); estos cambios se harán **después**. Las referencias a archivos son d
   funciona sin privilegios) o **copiar** la carpeta. La vía ACP ya copia (`materializePaperclipSkillCopy`).
   Además, que el fallo sea **visible**: aviso en la UI/estado del run o check en la verificación del agente.
 - **Estado del entorno:** el usuario ya activó el Modo desarrollador (2026-11-12), con lo que el symlink funciona
-  aquí; el cambio sigue siendo necesario para otros equipos Windows.
+  aquí y se **verificó** (TES-75: el agente ve e invoca `paperclip`); el cambio sigue siendo necesario para otros
+  equipos Windows.
 
 ## 2. Sonda de verificación de agentes (`claude-local/src/server/test.ts`, `probe-env.ts`)
 - Lanza `claude` con un **entorno casi vacío** (sin `HOME`/`USERPROFILE`/`PATH`): en Windows no encuentra el login.
