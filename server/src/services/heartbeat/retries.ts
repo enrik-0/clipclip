@@ -515,7 +515,7 @@ export function createHeartbeatRetries(db: Db, dependencies: HeartbeatRetryDepen
     // Interrupted preparation spent no provider work: its own lane, bounded
     // like the native controller-generation cap (execution-recovery-attempt).
     const interruptedPreparationLane = retryReason === INTERRUPTED_PREPARATION_RETRY_REASON;
-    const maxAttempts = Math.max(
+    const configuredMaxAttempts = Math.max(
       0,
       Math.floor(
         opts?.maxAttempts ?? (interruptedPreparationLane
@@ -524,11 +524,33 @@ export function createHeartbeatRetries(db: Db, dependencies: HeartbeatRetryDepen
     );
     const consumedAttempts = executionRetryAttemptCount(run, retryReason);
     const nextAttempt = consumedAttempts + 1;
+    const transientRecovery =
+      (retryReason === BOUNDED_TRANSIENT_HEARTBEAT_RETRY_REASON
+        || retryReason === INTERACTION_CONTINUATION_INFRA_RETRY_REASON && run.errorCode === REPOSITORY_CATALOG_UNAVAILABLE_CODE)
+        ? readTransientRecoveryContractFromRun(run)
+        : null;
+    const transientRetryNotBefore = transientRecovery?.retryNotBefore ?? null;
+    // The provider's reset bounds a quota wait to one attempt per window, so
+    // it neither spends the failure budget nor stops when that budget is spent.
+    const providerQuotaWait = opts?.maxAttempts == null && opts?.delayMs == null
+      && retryReason === BOUNDED_TRANSIENT_HEARTBEAT_RETRY_REASON
+      && transientRecovery?.errorFamily === "provider_quota" && transientRetryNotBefore !== null;
+    const maxAttempts = providerQuotaWait ? Math.max(configuredMaxAttempts, nextAttempt) : configuredMaxAttempts;
     // An interrupted preparation never spends failures, but it never revives
     // a chain whose real failures already spent the failure budget either.
     const failureBudgetSpent = interruptedPreparationLane && opts?.maxAttempts == null
       && executionFailureRetryCount(run) >= BOUNDED_TRANSIENT_HEARTBEAT_RETRY_MAX_ATTEMPTS;
+    const providerQuotaWaitDelayMs = providerQuotaWait && transientRetryNotBefore
+      ? Math.max(1000, transientRetryNotBefore.getTime() - now.getTime()) : 0;
     const computedBaseSchedule = failureBudgetSpent ? null
+      : providerQuotaWait
+        ? {
+            attempt: nextAttempt,
+            baseDelayMs: providerQuotaWaitDelayMs,
+            delayMs: providerQuotaWaitDelayMs,
+            dueAt: new Date(now.getTime() + providerQuotaWaitDelayMs),
+            maxAttempts,
+          }
       : opts?.delayMs != null
         ? nextAttempt <= maxAttempts
           ? {
@@ -553,17 +575,11 @@ export function createHeartbeatRetries(db: Db, dependencies: HeartbeatRetryDepen
     const baseSchedule = computedBaseSchedule
       ? { ...computedBaseSchedule, maxAttempts }
       : null;
-    const transientRecovery =
-      (retryReason === BOUNDED_TRANSIENT_HEARTBEAT_RETRY_REASON
-        || retryReason === INTERACTION_CONTINUATION_INFRA_RETRY_REASON && run.errorCode === REPOSITORY_CATALOG_UNAVAILABLE_CODE)
-        ? readTransientRecoveryContractFromRun(run)
-        : null;
     const codexTransientFallbackMode =
       agent.adapterType === "codex_local" && run.errorCode !== REPOSITORY_CATALOG_UNAVAILABLE_CODE &&
       transientRecovery?.errorFamily === "transient_upstream"
         ? resolveCodexTransientFallbackMode(nextAttempt)
         : null;
-    const transientRetryNotBefore = transientRecovery?.retryNotBefore ?? null;
     const contextSnapshot = parseObject(run.contextSnapshot);
     // A retry inherits the durable authorization scope of its source run. Do
     // not promote an untrusted or legacy contextSnapshot.issueId into a new
@@ -726,7 +742,10 @@ export function createHeartbeatRetries(db: Db, dependencies: HeartbeatRetryDepen
     const retryContextSnapshot: Record<string, unknown> = withRecoveryContext(
       {
         ...contextSnapshot,
-        executionRetryAccounting: accountingForScheduledRetry(run, retryReason, schedule.attempt),
+        executionRetryAccounting: accountingForScheduledRetry(run, retryReason,
+          providerQuotaWait ? consumedAttempts : schedule.attempt),
+        // Set on every successor so a later charged retry does not inherit it.
+        failureRetriesBeforeProviderQuotaWait: providerQuotaWait ? consumedAttempts : undefined,
         retryOfRunId: run.id,
         wakeReason,
         retryReason,
