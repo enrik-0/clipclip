@@ -44,6 +44,10 @@ import {
   logSandboxProbeDiagnostic,
 } from "./probe-diagnostics.js";
 import { buildLocalAdapterTestProbeEnv } from "./probe-env.js";
+import {
+  CLAUDE_HELLO_PROBE_PROMPT,
+  CLAUDE_HELLO_UNEXPECTED_OUTPUT_HINT,
+} from "./probe-prompt.js";
 
 function summarizeStatus(checks: AdapterEnvironmentCheck[]): AdapterEnvironmentTestResult["status"] {
   if (checks.some((check) => check.level === "error")) return "fail";
@@ -402,7 +406,7 @@ export async function testEnvironment(
           env: probeEnv,
           timeoutSec: helloProbeTimeoutSec,
           graceSec: 5,
-          stdin: "Respond with hello.",
+          stdin: CLAUDE_HELLO_PROBE_PROMPT,
           onLog: async () => {},
         },
       );
@@ -468,7 +472,7 @@ export async function testEnvironment(
           ...(hasHello
             ? {}
             : {
-                hint: "Try the probe manually (`claude --print - --output-format stream-json --verbose`) and prompt `Respond with hello`.",
+                hint: CLAUDE_HELLO_UNEXPECTED_OUTPUT_HINT,
               }),
         });
       } else {

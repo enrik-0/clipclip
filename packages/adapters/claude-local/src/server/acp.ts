@@ -55,6 +55,7 @@ import {
 } from "./probe-diagnostics.js";
 import { createWorkspaceRestoreTeardown } from "@paperclipai/adapter-utils/workspace-restore-teardown";
 import { buildLocalAdapterTestProbeEnv } from "./probe-env.js";
+import { CLAUDE_HELLO_PROBE_PROMPT } from "./probe-prompt.js";
 import { detectClaudeLoginRequired, extractClaudeRetryNotBefore, isClaudeProviderQuotaError, parseClaudeStreamJson } from "./parse.js";
 import { buildClaudeProbePermissionArgs, claudeSandboxPermissionEnv } from "./permissions.js";
 import { ADAPTER_AUTH_MISSING_CHECK_CODE } from "./auth-check.js";
@@ -733,7 +734,7 @@ export async function probeClaudeAcpSandboxLogin(input: {
       env,
       timeoutSec,
       graceSec: 5,
-      stdin: "Respond with hello.",
+      stdin: CLAUDE_HELLO_PROBE_PROMPT,
       onLog: async () => {},
     });
   } catch (err) {
