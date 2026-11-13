@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -80,12 +80,31 @@ const sandboxTarget: AdapterExecutionTarget = {
 const initLine =
   '{"type":"system","subtype":"init","cwd":"/home/daytona/paperclip-workspace","session_id":"abc","tools":["Bash","Read"]}';
 
+// The probe materializes a managed Claude config seed under PAPERCLIP_HOME; keep it out of the
+// developer's real ~/.paperclip.
+let isolatedPaperclipHome: string | null = null;
+let savedPaperclipHome: string | undefined;
+
+beforeAll(async () => {
+  savedPaperclipHome = process.env.PAPERCLIP_HOME;
+  isolatedPaperclipHome = await mkdtemp(path.join(os.tmpdir(), "paperclip-probe-home-"));
+  process.env.PAPERCLIP_HOME = isolatedPaperclipHome;
+});
+
+afterAll(async () => {
+  if (savedPaperclipHome === undefined) delete process.env.PAPERCLIP_HOME;
+  else process.env.PAPERCLIP_HOME = savedPaperclipHome;
+  if (isolatedPaperclipHome) await rm(isolatedPaperclipHome, { recursive: true, force: true }).catch(() => undefined);
+});
+
 afterEach(() => {
   vi.clearAllMocks();
   probeResult.throwError = null;
 });
 
-describe("claude sandbox hello probe diagnostics", () => {
+// The native sandbox sync guard (assertSyncOperationsConfined) treats host paths as POSIX on
+// purpose, so remote sandbox probes are not supported from a Windows host.
+describe.skipIf(process.platform === "win32")("claude sandbox hello probe diagnostics", () => {
   it("keeps the raw failure result out of every check and out of the log", async () => {
     // The non-zero result event carries a marker. The check must not repeat the
     // marker, and the log must carry only the allowlisted classification.
@@ -574,8 +593,10 @@ describe("claude CLI local hello probe hardening", () => {
 
   beforeEach(async () => {
     tempDir = await mkdtemp(path.join(os.tmpdir(), "paperclip-cli-localprobe-"));
-    claudePath = path.join(tempDir, "claude");
-    await writeFile(claudePath, "#!/bin/sh\nexit 0\n");
+    // Windows resolves executables through PATHEXT, so the fake needs an extension.
+    const isWindows = process.platform === "win32";
+    claudePath = path.join(tempDir, isWindows ? "claude.cmd" : "claude");
+    await writeFile(claudePath, isWindows ? "@echo off\r\nexit /b 0\r\n" : "#!/bin/sh\nexit 0\n");
     await chmod(claudePath, 0o755);
     savedPath = process.env.PATH;
     process.env.PATH = tempDir;
@@ -626,7 +647,7 @@ describe("claude CLI local hello probe hardening", () => {
     const spawnedCommand = call[2] as string;
     const spawnedEnv = (call[4] as { env: Record<string, string> }).env;
     // The trusted resolved claude executable, never the caller command path.
-    expect(spawnedCommand).toBe(claudePath);
+    expect(spawnedCommand?.toLowerCase()).toBe(claudePath.toLowerCase());
     expect(spawnedCommand).not.toContain("/tmp/evil");
     // The approved key reaches the child; the hostile keys never do.
     expect(spawnedEnv.ANTHROPIC_API_KEY).toBe("keep-this-key");
