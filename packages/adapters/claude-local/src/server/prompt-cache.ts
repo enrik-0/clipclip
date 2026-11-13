@@ -5,6 +5,7 @@ import { createHash, type Hash } from "node:crypto";
 import type { AdapterExecutionContext } from "@paperclipai/adapter-utils";
 import {
   ensurePaperclipSkillSymlink,
+  linkPaperclipSkillWithFallback,
   resolvePaperclipInstanceRootForAdapter,
   type PaperclipSkillEntry,
 } from "@paperclipai/adapter-utils/server-utils";
@@ -149,7 +150,19 @@ export async function prepareClaudePromptBundle(input: {
   for (const entry of skills) {
     const target = path.join(skillsHome, entry.runtimeName);
     try {
-      await ensurePaperclipSkillSymlink(entry.source, target);
+      // Windows without Developer Mode/elevation denies symlinks (EPERM). Fall back to a
+      // junction or a copy instead of silently running without the skill, and say so in the log.
+      await ensurePaperclipSkillSymlink(entry.source, target, async (linkSource, linkTarget) => {
+        await linkPaperclipSkillWithFallback(linkSource, linkTarget, {
+          onFallback: async ({ mode, error }) => {
+            const code = (error as { code?: unknown } | null)?.code;
+            await onLog(
+              "stderr",
+              `[paperclip] Skill "${entry.key}" could not be symlinked${typeof code === "string" ? ` (${code})` : ""}; made available as a ${mode} instead.\n`,
+            );
+          },
+        });
+      });
     } catch (err) {
       await onLog(
         "stderr",
