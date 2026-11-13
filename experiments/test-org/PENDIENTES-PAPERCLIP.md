@@ -97,3 +97,16 @@ Los runs de `claude_local` cargan el `~/.claude` del usuario: skills, plugins y 
 prueba de la filial de vídeo no se probó a propósito pedir "publica ya" por si un agente intentaba actuar sobre cuentas abiertas
 del usuario (p. ej. controlando Chrome). Antes de dar a los agentes tareas con efectos externos hay que **aislar** esa
 configuración (directorio de configuración propio sin credenciales copiadas, lista de MCP/skills permitidos por agente).
+
+## Estado de los cambios de código (2026-11-13) — ramas en el fork `enrik-0/clipclip`, sin PR
+| Ramas | Cambio | Verificación |
+|---|---|---|
+| `fix/skill-no-ai-attribution` (1f8dbf80d6) | Skill `paperclip`: se quita el `Co-Authored-By` y se prohíbe toda atribución a una IA (ítem 1b) | Solo texto; ningún test dependía de él |
+| `fix/confirmation-survives-user-comment` (4fabe3ba1f) | El defecto del servidor YA era `supersedeOnUserComment: false`; lo que lo contradecía eran la skill y `api-reference.md` (decían `true` y lo usaban en todos los ejemplos). Documentación y ejemplos alineados. Quedan ejemplos `true` en `server/src/services/native-runtime/runner-api-reference.ts` (otro motor), sin tocar | Solo documentación |
+| `feat/claude-local-isolated-config` (70758444a8) | Opción `isolatePersonalConfig` (defecto `false`): `--setting-sources project,local` + MCP estricto vacío. Credenciales intactas | 3 tests; con `claude` real: 55 skills → 13 (solo las integradas) |
+| `fix/probe-language-neutral-all-adapters` (316bb8300f, parte de `fix/agent-probe-language-neutral`) | Prompt de sonda neutro (`HELLO_PROBE_PROMPT` en adapter-utils) en codex, cursor, gemini, kimi, opencode, pi, grok, hermes | kimi/grok/opencode OK; typecheck OK; fallos restantes de codex/cursor/gemini/pi son de Windows (rutas, ejecutables falsos) |
+| `fix/claude-local-tests-windows` (6ad593bcab) | Tests de `claude-local` portables (`.cmd` + PATHEXT, mayúsculas), `PAPERCLIP_HOME` temporal, y **bug real**: `tar` GNU en Windows leía `C:\…` como `host:ruta` → `--force-local` | 14 pasan / 13 omitidos (antes 17 fallaban) |
+
+Hallazgos: `assertSyncOperationsConfined` (guarda de seguridad) supone rutas POSIX a propósito, por lo que la sincronización de
+sandbox remoto no funciona desde un host Windows (13 tests omitidos en Windows). Falta aislar `isolatePersonalConfig` también en
+el carril ACP y activarlo en `setup.mjs` de la org. Siguen fallando en Windows muchos tests de codex/cursor/gemini/pi.
