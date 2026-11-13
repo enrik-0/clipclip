@@ -9,8 +9,10 @@ const tempDirs: string[] = [];
 async function makeTrustedPathWithClaude(): Promise<{ dir: string; claudePath: string }> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "paperclip-probe-env-"));
   tempDirs.push(dir);
-  const claudePath = path.join(dir, "claude");
-  await writeFile(claudePath, "#!/bin/sh\nexit 0\n");
+  // Windows resolves executables through PATHEXT, so the fake needs an extension.
+  const isWindows = process.platform === "win32";
+  const claudePath = path.join(dir, isWindows ? "claude.cmd" : "claude");
+  await writeFile(claudePath, isWindows ? "@echo off\r\nexit /b 0\r\n" : "#!/bin/sh\nexit 0\n");
   await chmod(claudePath, 0o755);
   return { dir, claudePath };
 }
@@ -29,7 +31,8 @@ describe("buildLocalAdapterTestProbeEnv", () => {
       callerEnv: { PATH: "/hostile/bin", Path: "/hostile/bin", command: "/tmp/evil/claude" },
       trustedEnv: { PATH: dir },
     });
-    expect(built.command).toBe(claudePath);
+    // Windows resolves through PATHEXT and may return the extension in another case.
+    expect(built.command?.toLowerCase()).toBe(claudePath.toLowerCase());
     expect(built.env.PATH).toBeUndefined();
     expect(built.env.Path).toBeUndefined();
   });

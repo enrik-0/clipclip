@@ -12,6 +12,7 @@ import os from "node:os";
 import { assertWorkspaceManifestDiskSpace, createWorkspaceManifest, WorkspaceManifestMap, workspacePaths, workspacePathMatcher, writeWorkspacePaths, isPathManifest, type WorkspacePaths } from "./workspace-manifest.js";
 import path from "node:path";
 import { promisify } from "node:util";
+import { tarForceLocalArgs } from "./tar-force-local.js";
 import {
   buildRemoteGitDeltaBundleScript,
   GIT_SHALLOW_METADATA_EXIT_CODE,
@@ -922,8 +923,19 @@ async function persistDurableSeedArchive(input: {
   }
 }
 
+let tarForceLocalPromise: Promise<string[]> | null = null;
+function resolveTarForceLocal(): Promise<string[]> {
+  tarForceLocalPromise ??= (async () => {
+    if (process.platform !== "win32") return [];
+    const version = await execFile("tar", ["--version"]).then((r) => String(r.stdout), () => null);
+    return tarForceLocalArgs(version, process.platform);
+  })();
+  return tarForceLocalPromise;
+}
+
 async function execTar(args: string[]): Promise<void> {
-  await execFile("tar", args, {
+  const forceLocal = await resolveTarForceLocal();
+  await execFile("tar", [...forceLocal, ...args], {
     env: {
       ...process.env,
       COPYFILE_DISABLE: "1",
