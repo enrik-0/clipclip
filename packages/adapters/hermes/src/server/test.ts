@@ -343,7 +343,7 @@ export async function testEnvironment(
       for (const [key, value] of Object.entries((config.env ?? {}) as Record<string, unknown>)) {
         if (typeof value === "string") env[key] = value;
       }
-      const args = ["chat", "-Q", "-q", "Respond with hello. Do not use tools.", "--max-turns", "1"];
+      const args = ["chat", "-Q", "-q", "Respond with exactly one word, in English, with no other text: hello. Do not use tools.", "--max-turns", "1"];
       if (asString(config.model)) args.push("-m", asString(config.model)!);
       const provider = asString(config.provider);
       if (provider && provider !== "auto") args.push("--provider", provider);

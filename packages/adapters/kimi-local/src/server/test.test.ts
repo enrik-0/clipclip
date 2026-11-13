@@ -93,7 +93,7 @@ describe("kimi_local testEnvironment", () => {
         "--output-format",
         "stream-json",
         "-p",
-        "Respond with hello.",
+        "Respond with exactly one word, in English, with no other text: hello",
       ]),
       expect.any(Object),
     );

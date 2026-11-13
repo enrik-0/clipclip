@@ -1,3 +1,4 @@
+import { HELLO_PROBE_PROMPT } from "@paperclipai/adapter-utils/server-utils";
 import type {
   AdapterEnvironmentCheck,
   AdapterEnvironmentTestContext,
@@ -326,7 +327,7 @@ export async function testEnvironment(
     if (configuredModel && configuredModel !== DEFAULT_GROK_LOCAL_MODEL) {
       probeArgs.push("--model", configuredModel);
     }
-    probeArgs.push("--single", "Respond with exactly hello.");
+    probeArgs.push("--single", HELLO_PROBE_PROMPT);
 
     const helloProbe = await runAdapterExecutionTargetProcess(
       runId,

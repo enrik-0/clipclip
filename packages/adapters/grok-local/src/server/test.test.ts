@@ -108,7 +108,7 @@ describe("grok_local testEnvironment", () => {
         "dontAsk",
         "--disable-web-search",
         "--single",
-        "Respond with exactly hello.",
+        "Respond with exactly one word, in English, with no other text: hello",
       ]),
       expect.any(Object),
     );

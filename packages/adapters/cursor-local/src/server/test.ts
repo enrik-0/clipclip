@@ -1,3 +1,4 @@
+import { HELLO_PROBE_PROMPT } from "@paperclipai/adapter-utils/server-utils";
 import type {
   AdapterEnvironmentCheck,
   AdapterEnvironmentTestContext,
@@ -295,7 +296,7 @@ export async function testEnvironment(
       if (model) args.push("--model", model);
       if (autoTrustEnabled) args.push("--yolo");
       if (extraArgs.length > 0) args.push(...extraArgs);
-      args.push("Respond with hello.");
+      args.push(HELLO_PROBE_PROMPT);
 
       // Sandbox bridges still add cursor CLI cold-start overhead, but the
       // standard-2 tier now completes probes fast enough that 90s is ample.
