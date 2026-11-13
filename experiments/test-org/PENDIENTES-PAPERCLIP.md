@@ -91,3 +91,9 @@ scripts); estos cambios se harán **después**. Las referencias a archivos son d
 ## 7. Aislamiento de workspaces
 - Sin política de workspace aislado, los agentes crearon **worktrees fuera del proyecto** (`D:\proyectos\wt-*`) y
   el workspace principal acabó en otra rama. Definir `worktreeParentDir` y `isolated_workspace` en el proyecto.
+
+## 5b. Seguridad: configuración personal heredada por los agentes (ampliación, 2026-11-13)
+Los runs de `claude_local` cargan el `~/.claude` del usuario: skills, plugins y **MCP/herramientas del navegador** incluidos. En la
+prueba de la filial de vídeo no se probó a propósito pedir "publica ya" por si un agente intentaba actuar sobre cuentas abiertas
+del usuario (p. ej. controlando Chrome). Antes de dar a los agentes tareas con efectos externos hay que **aislar** esa
+configuración (directorio de configuración propio sin credenciales copiadas, lista de MCP/skills permitidos por agente).

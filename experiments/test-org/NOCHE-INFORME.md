@@ -78,7 +78,7 @@ no toca el entorno (nombre inicial `fix/agent-probe-windows` descartado).
   kimi-local, cursor-local.
 - Sigue sin explicar la **intermitencia** de la sonda (a veces pasaba y a veces no con la misma configuración).
 
-## Fase E — Filial de vídeo: NO ejecutada
+## Fase E — Filial de vídeo: aplazada esa noche (ejecutada el 13/11 por la tarde; ver «Fase E ejecutada» al final)
 El servidor de Paperclip estaba parado (cerrado por el sistema por falta de memoria) y el aviso del entorno indica no
 relanzarlo por cuenta propia. Pendiente para cuando el usuario lo pida. Dato útil: `ffmpeg` está instalado
 (`…\Gyan.FFmpeg…\ffmpeg-9.0.2-full_build\bin\ffmpeg.exe`, en el PATH del usuario).
@@ -94,3 +94,35 @@ relanzarlo por cuenta propia. Pendiente para cuando el usuario lo pida. Dato út
 2. Hacer pasar en Windows la suite de la sonda de claude-local (tests que suponen POSIX) antes de seguir modificando esa zona.
 3. Arrancar el servidor (sin UI) y ejecutar la fase E (vídeo); crear en Paperclip las tareas de UX de la fase C.
 4. Investigar la intermitencia de la sonda con el prompt nuevo (¿desaparece?).
+
+## Fase E ejecutada (13/11, 15:22-15:39 UTC) — filial de vídeo
+Con el servidor arrancado sin UI (Docker Desktop había que relanzarlo tras el reinicio del PC). Tarea `TES-76` creada **como un
+usuario**, solo con la idea: *"Quiero un vídeo corto (unos 20 segundos, formato vertical) que presente Cuentas Claras, la app para
+repartir gastos entre amigos, para redes sociales"*, asignada al CEO, sin explicar el flujo.
+
+**Resultado: el flujo funcionó de punta a punta en ~17 minutos, sin atascos ni intervención técnica.**
+CEO → Director de Vídeo (`TES-77`) → Guionista (`TES-78`) → Editor (`TES-79`) → Director → CEO; después `TES-80` (paquete de publicación).
+- **Preguntas:** el Director hizo **5 preguntas de golpe con supuestos propuestos** (plataforma, mensaje clave, tono, voz/música,
+  CTA/marca/funciones) aunque el encargo parecía claro → la instrucción de preguntar sin tope funciona.
+- **Aprobaciones del board** (como operador, anotadas en `board-actions.md`): respuestas a las 5 preguntas; guion v1; vídeo v1;
+  paquete de publicación **solo como borrador**. **Nunca se aprobó publicar** y no se publicó nada.
+- **Documentos publicados en Paperclip:** `guion` (TES-78 y TES-77) y `paquete-publicacion` (TES-80). **Adjuntos** (entregables):
+  `.mp4`, `.srt` y miniatura `.png` en TES-79/TES-77.
+- **`ffmpeg`:** el Editor lo detectó y lo usó (también `ffprobe`) sin ayuda.
+- **Vídeo (revisado con `ffprobe` y hoja de fotogramas):** 20,000 s, 1080×1920, H.264 25 fps, audio AAC 48 kHz (media −22,7 dB,
+  pico −1,5 dB, efectos de sonido, sin música). 8 escenas que siguen el guion, identidad visual propia crema/verde, texto en la zona
+  segura, subtítulos `.srt` coherentes. Calidad: buena para una v1 ilustrada.
+- **Revisión crítica propia del Director** (sugerencias para una v2): en la escena 5 el resaltado debería acabar en «A partes
+  iguales»; no citar −14 LUFS (se midió −15,8); comprobar el tamaño de la línea secundaria de la escena 5.
+- **Paquete de publicación:** título/gancho, descripción, etiquetas y notas para Reels y TikTok; **no inventa URL** (deja
+  `[ENLACE]`), limita el texto a lo que dice `PRODUCT.md`, documenta derechos y supuestos.
+
+**Hallazgos nuevos**
+1. **El Publicador no intervino**: el Director preparó el paquete él mismo. Aclarar en las instrucciones quién lo prepara.
+2. **Riesgo de seguridad (no probado a propósito):** los agentes heredan la configuración personal del usuario (skills, plugins,
+   MCP, posible control de Chrome). Una orden de "publícalo ya" podría intentar actuar sobre cuentas abiertas del usuario. Hay que
+   aislar esa configuración antes de dar a los agentes cualquier tarea con efectos externos. Se evitó pedirles publicar.
+3. Comentar en una tarea ya cerrada (`TES-76`) la reabrió y el CEO creó una tarea nueva (`TES-80`): comportamiento correcto.
+4. Arranque tras reinicio: hay que levantar Docker Desktop antes de `start-dev.ps1` (el script no lo hace).
+
+Archivos del vídeo en `D:\proyectos\test-org-data\video-v1\` (`v1.mp4`, `v1.srt`, `thumb.png`, `hoja.png`).

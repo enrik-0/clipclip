@@ -48,3 +48,10 @@ Proyecto `Software`, como lo haría un usuario (una por punto, con la idea, sin 
   aprobar ninguna publicación real (no hay canal).
 - Residuo de tests en tu carpeta personal: `C:\Users\villa\.paperclip\` (1 archivo, creado por los tests de claude-local);
   se puede borrar a mano.
+
+## Resultado de la filial de vídeo (13/11) y pendientes que dejó
+- Funcionó de punta a punta (ver `NOCHE-INFORME.md`, «Fase E ejecutada»). Pendiente: **aclarar quién prepara el paquete de
+  publicación** (el Director lo hizo y el Publicador no intervino) y probar el Publicador solo cuando la config esté aislada.
+- Mejoras del vídeo v1 sugeridas por el propio Director (escena 5, cifra de LUFS, tamaño de línea secundaria): crear una tarea de v2
+  si se quiere.
+- `start-dev.ps1` no levanta Docker Desktop: tras un reinicio hay que abrirlo antes (anotado como mejora del script).
