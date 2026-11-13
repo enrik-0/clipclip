@@ -69,7 +69,7 @@ Core fields:
 - promptTemplate (string, optional): run prompt template
 - maxTurnsPerRun (number, optional): max turns for one run
 - dangerouslySkipPermissions (boolean, optional, default true): allow non-interactive Claude runs to proceed without approval prompts. Local and remote targets receive --dangerously-skip-permissions for all built-in and connected tools. Managed sandbox targets also identify themselves to Claude so root container launches support bypass. Non-sandbox root processes must run Claude as a non-root user; Paperclip does not silently downgrade the requested mode.
-- isolatePersonalConfig (boolean, optional, default false): do not load the operator's personal Claude setup. Runs pass --setting-sources project,local (no user plugins, skills, hooks or settings) and a strict, empty MCP config unless Paperclip supplies its own, so agents cannot reach personal MCP servers such as browser control or mail. Credentials are unaffected.
+- isolatePersonalConfig (boolean, optional, default false; CLI engine only, not the ACP engine): do not load the operator's personal Claude setup. Runs pass --setting-sources project,local (no user plugins, skills, hooks or settings) and a strict, empty MCP config unless Paperclip supplies its own, so agents cannot reach personal MCP servers such as browser control or mail. Credentials are unaffected.
 - command (string, optional): defaults to "claude"
 - extraArgs (string[], optional): additional CLI args
 - env (object, optional): KEY=VALUE environment variables
