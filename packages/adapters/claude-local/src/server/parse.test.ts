@@ -211,6 +211,42 @@ describe("isClaudeTransientUpstreamError", () => {
     );
   });
 
+  it("classifies the hyphenated 5-hour limit wording as provider quota and extracts the retry time", () => {
+    // The CLI names the window ("5-hour") and reports the failure as an HTTP 429 rate_limit error.
+    const now = new Date("2026-11-13T18:00:00.000Z");
+    const errorMessage =
+      "API Error: You've hit your 5-hour limit · resets 9:10pm (Europe/Madrid) (error type rate_limit, HTTP 429)";
+
+    expect(isClaudeProviderQuotaError({ errorMessage })).toBe(true);
+    expect(isClaudeTransientUpstreamError({ errorMessage })).toBe(false);
+    expect(extractClaudeRetryNotBefore({ errorMessage }, now)?.toISOString()).toBe(
+      "2026-11-13T20:10:00.000Z",
+    );
+  });
+
+  it("does not read the allowance event every run prints as a rate-limit failure", () => {
+    const stdout = JSON.stringify({
+      type: "rate_limit_event",
+      rate_limit_info: { status: "allowed", resetsAt: 1794619200, rateLimitType: "five_hour", overageStatus: "rejected" },
+    });
+
+    expect(isClaudeTransientUpstreamError({ stdout, errorMessage: "Claude exited with code 1" })).toBe(false);
+    expect(isClaudeProviderQuotaError({ stdout, errorMessage: "Claude exited with code 1" })).toBe(false);
+  });
+
+  it("reads a rejected allowance event as provider quota with the exact window reset", () => {
+    const now = new Date("2026-11-13T18:00:00.000Z");
+    const resetsAt = Date.parse("2026-11-13T20:10:00.000Z") / 1000;
+    const stdout = [
+      JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "allowed", resetsAt, rateLimitType: "five_hour" } }),
+      JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt, rateLimitType: "five_hour" } }),
+    ].join("\n");
+
+    expect(isClaudeProviderQuotaError({ stdout })).toBe(true);
+    expect(isClaudeTransientUpstreamError({ stdout })).toBe(false);
+    expect(extractClaudeRetryNotBefore({ stdout }, now)?.toISOString()).toBe("2026-11-13T20:10:00.000Z");
+  });
+
   it("classifies Anthropic API rate_limit_error and overloaded_error as transient", () => {
     expect(
       isClaudeTransientUpstreamError({

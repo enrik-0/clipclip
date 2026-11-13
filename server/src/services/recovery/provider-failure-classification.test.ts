@@ -183,6 +183,21 @@ describe("classifyAdapterFailureForRecovery", () => {
     });
   });
 
+  it("classifies the hyphenated 5-hour limit wording and parses its reset", () => {
+    const now = new Date("2026-11-13T18:00:00.000Z");
+    const classification = classifyAdapterFailureForRecovery({
+      errorCode: "adapter_failed",
+      error: "API Error: You've hit your 5-hour limit · resets 9:10pm (Europe/Madrid) (error type rate_limit, HTTP 429)",
+      resultJson: null,
+    }, now);
+
+    expect(classification).toEqual({
+      kind: "provider_quota",
+      retryAt: new Date("2026-11-13T20:10:00.000Z"),
+      parsedResetTime: true,
+    });
+  });
+
   it.each([
     "model_not_found: requested model does not exist",
     "No API credentials were found for this provider",
