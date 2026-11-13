@@ -3,9 +3,11 @@ import { AgentObservabilitySettingsSection } from "../components/observability/A
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  type CompanyActivitySchedule,
   type InteractionResolverGovernance,
   type IssueThreadInteractionKind,
 } from "@paperclipai/shared";
+import { ActivityHoursSettings } from "../components/ActivityHoursSettings";
 import { useCompany } from "../context/CompanyContext";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useOptionalToastActions } from "../context/ToastContext";
@@ -83,6 +85,14 @@ export function CompanySettings() {
       companiesApi.update(selectedCompanyId!, {
         requireBoardApprovalForNewAgents: requireApproval
       }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
+    }
+  });
+
+  const activityHoursMutation = useMutation({
+    mutationFn: (activitySchedule: CompanyActivitySchedule) =>
+      companiesApi.update(selectedCompanyId!, { activitySchedule }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.companies.all });
     }
@@ -350,6 +360,13 @@ export function CompanySettings() {
           />
         </div>
       </div>
+
+      <ActivityHoursSettings
+        schedule={selectedCompany.activitySchedule ?? null}
+        onSave={(next) => activityHoursMutation.mutate(next)}
+        isPending={activityHoursMutation.isPending}
+        errorMessage={activityHoursMutation.error ? describeError(activityHoursMutation.error).body : null}
+      />
 
       {/* Interaction governance */}
       <InteractionGovernancePanel
