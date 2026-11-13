@@ -1,3 +1,4 @@
+import { HELLO_PROBE_PROMPT } from "@paperclipai/adapter-utils/server-utils";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -274,7 +275,7 @@ export async function testEnvironment(
       const args = ["--output-format", "stream-json"];
       if (model) args.push("-m", model);
       if (extraArgs.length > 0) args.push(...extraArgs);
-      args.push("-p", "Respond with hello.");
+      args.push("-p", HELLO_PROBE_PROMPT);
 
       const probe = await runAdapterExecutionTargetProcess(
         runId,

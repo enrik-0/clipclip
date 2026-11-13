@@ -5083,3 +5083,11 @@ export async function runChildProcess(
       .catch(reject);
   });
 }
+
+/**
+ * Prompt of the "hello" environment probe shared by local adapters. Probes pass
+ * when the reply matches /\bhello\b/i; a bare "Respond with hello." makes a model
+ * configured to answer in another language reply "¡Hola!" and the probe fails.
+ */
+export const HELLO_PROBE_PROMPT =
+  "Respond with exactly one word, in English, with no other text: hello";

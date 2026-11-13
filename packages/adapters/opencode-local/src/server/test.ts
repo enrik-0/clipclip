@@ -1,3 +1,4 @@
+import { HELLO_PROBE_PROMPT } from "@paperclipai/adapter-utils/server-utils";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -410,7 +411,7 @@ export async function testEnvironment(
             env: runtimeEnv,
             timeoutSec: helloProbeTimeoutSec,
             graceSec: 5,
-            stdin: "Respond with hello.",
+            stdin: HELLO_PROBE_PROMPT,
             onLog: async () => {},
           },
         );

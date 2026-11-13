@@ -1,3 +1,4 @@
+import { HELLO_PROBE_PROMPT } from "@paperclipai/adapter-utils/server-utils";
 import type {
   AdapterEnvironmentCheck,
   AdapterEnvironmentTestContext,
@@ -256,7 +257,7 @@ export async function testEnvironment(
       return asStringArray(config.args);
     })();
 
-    const args = ["-p", "Respond with hello.", "--mode", "json"];
+    const args = ["-p", HELLO_PROBE_PROMPT, "--mode", "json"];
     if (provider) args.push("--provider", provider);
     if (modelId) args.push("--model", modelId);
     if (thinking) args.push("--thinking", thinking);

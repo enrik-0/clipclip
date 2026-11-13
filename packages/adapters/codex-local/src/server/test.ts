@@ -1,3 +1,4 @@
+import { HELLO_PROBE_PROMPT } from "@paperclipai/adapter-utils/server-utils";
 import type {
   AdapterEnvironmentCheck,
   AdapterEnvironmentTestContext,
@@ -492,7 +493,7 @@ export async function testEnvironment(
             env: preparedProbe.env,
             timeoutSec: 45,
             graceSec: 5,
-            stdin: "Respond with hello.",
+            stdin: HELLO_PROBE_PROMPT,
             onLog: async () => {},
           },
         );

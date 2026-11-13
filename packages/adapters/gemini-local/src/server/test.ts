@@ -1,3 +1,4 @@
+import { HELLO_PROBE_PROMPT } from "@paperclipai/adapter-utils/server-utils";
 import path from "node:path";
 import type {
   AdapterEnvironmentCheck,
@@ -204,7 +205,7 @@ export async function testEnvironment(
         return asStringArray(config.args);
       })();
 
-      const args = ["--output-format", "stream-json", "--prompt", "Respond with hello."];
+      const args = ["--output-format", "stream-json", "--prompt", HELLO_PROBE_PROMPT];
       if (model && model !== DEFAULT_GEMINI_LOCAL_MODEL) args.push("--model", model);
       if (approvalMode !== "default") args.push("--approval-mode", approvalMode);
       if (sandbox) {
