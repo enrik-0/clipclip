@@ -88,6 +88,7 @@ import {
   resolveSharedClaudeConfigDir,
   writePaperclipClaudeMcpConfig,
 } from "./claude-config.js";
+import { buildPersonalConfigIsolationArgs } from "./personal-config-isolation.js";
 import {
   claudeCliVersionAtLeast,
   claudeCommandLooksLike,
@@ -442,6 +443,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   );
   const effort = asString(config.effort, "");
   const chrome = asBoolean(config.chrome, false);
+  const isolatePersonalConfig = asBoolean(config.isolatePersonalConfig, false);
   const maxTurns = asNumber(config.maxTurnsPerRun, 0);
   const dangerouslySkipPermissions = asBoolean(config.dangerouslySkipPermissions, true);
   const configEnv = parseObject(config.env);
@@ -852,6 +854,7 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   ) => {
     const args = ["--print", "--output-format", "stream-json", "--verbose"];
     if (config.managedAiConnection) args.push("--setting-sources", "user");
+    args.push(...buildPersonalConfigIsolationArgs({ enabled: isolatePersonalConfig && !config.managedAiConnection, hasRuntimeMcpServers: runtimeMcpServers.length > 0 }));
     if (resumeSessionId) args.push("--resume", resumeSessionId);
     args.push(...buildClaudeExecutionPermissionArgs({
       dangerouslySkipPermissions,
