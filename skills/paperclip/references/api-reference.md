@@ -1055,7 +1055,7 @@ POST /api/issues/{issueId}/interactions
     "rejectRequiresReason": true,
     "rejectReasonLabel": "What needs to change?",
     "detailsMarkdown": "Review the latest plan document before accepting.",
-    "supersedeOnUserComment": true,
+    "supersedeOnUserComment": false,
     "target": {
       "type": "issue_document",
       "issueId": "{issueId}",
@@ -1082,7 +1082,7 @@ Rules:
 - `continuationPolicy: "wake_assignee"` resumes the assignee when a confirmation is accepted or rejected. A saved rejection reason can carry the revised direction; do not duplicate it in a second comment solely to wake the agent again.
 - `wake_assignee_on_accept` resumes only on acceptance. If a card has no reason field, the board/user can add a normal comment with revised direction.
 - Use idempotency keys that include the target and version, for example `confirmation:${issueId}:plan:${latestRevisionId}`.
-- Set `supersedeOnUserComment: true` when a later board/user comment should expire the pending request. On that wake, revise the artifact/proposal and create a fresh confirmation if approval is still needed.
+- Leave `supersedeOnUserComment` at its default `false` unless a later board/user comment should expire the pending request. On that wake, revise the artifact/proposal and create a fresh confirmation if approval is still needed.
 - A pending interaction is an explicit waiting path. Before ending the heartbeat, update the source issue into a visible waiting posture, normally `in_review`, and leave a comment that names the response needed and the effective audience.
 - For plan approval, update the `plan` issue document first, create the confirmation against the latest plan revision, set the source issue to `in_review`, and wait for acceptance before implementation.
 
@@ -1129,7 +1129,7 @@ POST /api/issues/{issueId}/interactions
     "rejectReasonLabel": "What should change?",
     "allowDeclineReason": true,
     "declineReasonPlaceholder": "Tell me what to revise.",
-    "supersedeOnUserComment": true,
+    "supersedeOnUserComment": false,
     "target": {
       "type": "issue_document",
       "issueId": "{issueId}",
@@ -1157,7 +1157,7 @@ Payload field reference (`RequestCheckboxConfirmationPayload`):
 | `rejectReasonLabel`         | string (1–160) \| `null`                   | `null`                           | Field label for the reject reason.                                                                                                          |
 | `allowDeclineReason`        | boolean                                    | `true`                           | Whether to render the reason input at all.                                                                                                  |
 | `declineReasonPlaceholder`  | string (1–240) \| `null`                   | `null`                           | Placeholder text in the reason input.                                                                                                       |
-| `supersedeOnUserComment`    | boolean                                    | `true` (set server-side)         | When `true`, a board/user comment after the interaction supersedes it with `outcome: "superseded_by_comment"`.                              |
+| `supersedeOnUserComment`    | boolean                                    | `false`                          | When `true`, a board/user comment after the interaction supersedes it with `outcome: "superseded_by_comment"`.                              |
 | `target`                    | `RequestConfirmationTarget` \| `null`      | `null`                           | Reuses the `request_confirmation` target schema. Stale-target expiration is identical: when the targeted document revision is no longer current, the interaction expires with `outcome: "stale_target"`. |
 
 Envelope defaults that differ from other kinds:
@@ -1198,7 +1198,7 @@ Other outcomes match `request_confirmation`:
 - `issue_closed` — `{ outcome: "issue_closed" }`. Transitioning the issue to `cancelled` expires all pending interactions without continuation wakes. Transitioning to `done` expires current questions and governed requests, but retains ordinary historical questions that precede newer human direction. An authorized human can answer a retained question after completion; this records history without reopening work or creating a response wake. Listing a terminal issue also applies these rules in its catch-up sweep.
 
 - `rejected` — `{ outcome: "rejected", reason, commentId }`. `selectedOptionIds` is absent.
-- `superseded_by_comment` — `{ outcome: "superseded_by_comment", commentId }`. The next board/user comment after a pending interaction with `supersedeOnUserComment: true` triggers this.
+- `superseded_by_comment` — `{ outcome: "superseded_by_comment", commentId }`. The next board/user comment after a pending interaction with `supersedeOnUserComment: true` (opt-in) triggers this.
 - `stale_target` — `{ outcome: "stale_target", staleTarget }`. Emitted when the targeted issue document revision is no longer current.
 
 Best practice:
@@ -1232,7 +1232,7 @@ POST /api/issues/{issueId}/interactions
     "requireReasonOn": ["reject"],
     "reasonLabel": "What should change?",
     "allowBulkApprove": true,
-    "supersedeOnUserComment": true,
+    "supersedeOnUserComment": false,
     "target": {
       "type": "issue_document",
       "issueId": "{issueId}",
@@ -1255,7 +1255,7 @@ Payload field reference (`RequestItemVerdictsPayload`):
 | `requireReasonOn`        | verdict array                                            | `["reject"]`               | Each value must be enabled by `verdicts`. Pending submissions with those verdicts require a non-empty `reason`.              |
 | `reasonLabel`            | string (1–160) \| `null`                                 | `null`                     | Field label for the verdict reason.                                                                                           |
 | `allowBulkApprove`       | boolean                                                  | `true`                     | UI hint for bulk-approve affordances. Server still validates each submitted item id.                                          |
-| `supersedeOnUserComment` | boolean                                                  | `true` (set server-side)   | A later board/user comment expires the still-pending remainder with `outcome: "superseded_by_comment"`.                      |
+| `supersedeOnUserComment` | boolean                                                  | `false`                    | A later board/user comment expires the still-pending remainder with `outcome: "superseded_by_comment"`.                      |
 | `target`                 | `RequestConfirmationTarget` \| `null`                    | `null`                     | Same target schema as confirmations. Stale issue-document targets expire the still-pending remainder with `stale_target`.     |
 
 Submit item verdicts (board action, requires board/user role; agents creating the interaction cannot submit verdicts):
