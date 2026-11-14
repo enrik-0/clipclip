@@ -460,3 +460,113 @@ describe("prepareOpenCodeRuntimeConfig", () => {
     await prepared.cleanup();
   });
 });
+
+describe("prepareOpenCodeRuntimeConfig run MCP servers", () => {
+  const token = "secret-run-token-123";
+  const servers = [
+    { name: "Paperclip projects", url: "http://127.0.0.1:3100/api/mcp/project-tools", token, connectionId: "paperclip-project-tools" },
+    { name: "Paperclip connections", url: "http://127.0.0.1:3100/api/runtime-tools/mcp", token, connectionId: "paperclip-runtime-tools" },
+    { name: "Obsidian", url: "http://127.0.0.1:3100/api/mcp/gateway/abc", token, connectionId: "0f9e8d7c-aaaa-bbbb-cccc-000000000001" },
+  ];
+  const remoteEntry = (url: string) => ({
+    type: "remote",
+    url,
+    headers: { Authorization: `Bearer ${token}` },
+    oauth: false,
+  });
+
+  async function readRuntimeConfig(prepared: { env: Record<string, string> }) {
+    return JSON.parse(
+      await fs.readFile(path.join(prepared.env.XDG_CONFIG_HOME, "opencode", "opencode.json"), "utf8"),
+    ) as Record<string, any>;
+  }
+
+  it("writes run MCP servers as remote OpenCode servers with a bearer header and keeps operator servers", async () => {
+    const configHome = await makeConfigHome({
+      mcp: { github: { type: "local", command: ["gh-mcp"] } },
+    });
+    const prepared = await prepareOpenCodeRuntimeConfig({
+      env: { XDG_CONFIG_HOME: configHome },
+      config: {},
+      runtimeMcpServers: servers,
+    });
+    cleanupPaths.add(prepared.env.XDG_CONFIG_HOME);
+    const config = await readRuntimeConfig(prepared);
+    expect(config.mcp).toEqual({
+      github: { type: "local", command: ["gh-mcp"] },
+      paperclip_projects: remoteEntry(servers[0]!.url),
+      paperclip_connections: remoteEntry(servers[1]!.url),
+      obsidian: remoteEntry(servers[2]!.url),
+    });
+    const notes = prepared.notes.join("\n");
+    expect(notes).toContain("paperclip_projects, paperclip_connections, obsidian");
+    expect(notes).not.toContain(token);
+    expect(JSON.stringify(prepared.env)).not.toContain(token);
+    const operatorConfig = await fs.readFile(path.join(configHome, "opencode", "opencode.json"), "utf8");
+    expect(operatorConfig).not.toContain(token);
+    await prepared.cleanup();
+    await expect(fs.access(prepared.env.XDG_CONFIG_HOME)).rejects.toThrow();
+  });
+
+  it("does not replace an operator server or an inline server with the same name", async () => {
+    const configHome = await makeConfigHome({
+      mcp: { obsidian: { type: "remote", url: "https://operator.example/mcp" } },
+    });
+    const prepared = await prepareOpenCodeRuntimeConfig({
+      env: {
+        XDG_CONFIG_HOME: configHome,
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({ mcp: { paperclip_projects: { type: "local", command: ["x"] } } }),
+      },
+      config: {},
+      runtimeMcpServers: [
+        servers[0]!,
+        servers[2]!,
+        { ...servers[2]!, url: "http://127.0.0.1:3100/api/mcp/gateway/def", connectionId: "11111111-2222-3333-4444-555555555555" },
+      ],
+    });
+    cleanupPaths.add(prepared.env.XDG_CONFIG_HOME);
+    const config = await readRuntimeConfig(prepared);
+    expect(config.mcp).toEqual({
+      obsidian: { type: "remote", url: "https://operator.example/mcp" },
+      paperclip_projects_paperclip: remoteEntry(servers[0]!.url),
+      obsidian_0f9e8d7c: remoteEntry(servers[2]!.url),
+      obsidian_11111111: remoteEntry("http://127.0.0.1:3100/api/mcp/gateway/def"),
+    });
+    expect(prepared.env.OPENCODE_CONFIG_CONTENT).not.toContain(token);
+    await prepared.cleanup();
+  });
+
+  it("adds servers under mcp.servers when the operator config uses the V2 layout", async () => {
+    const configHome = await makeConfigHome({
+      mcp: { timeout: { startup: 10000 }, servers: { docs: { type: "remote", url: "https://docs.example/mcp" } } },
+    });
+    const prepared = await prepareOpenCodeRuntimeConfig({
+      env: { XDG_CONFIG_HOME: configHome },
+      config: {},
+      runtimeMcpServers: [servers[0]!],
+    });
+    cleanupPaths.add(prepared.env.XDG_CONFIG_HOME);
+    const config = await readRuntimeConfig(prepared);
+    expect(config.mcp).toEqual({
+      timeout: { startup: 10000 },
+      servers: {
+        docs: { type: "remote", url: "https://docs.example/mcp" },
+        paperclip_projects: remoteEntry(servers[0]!.url),
+      },
+    });
+    await prepared.cleanup();
+  });
+
+  it("leaves the mcp section untouched when the run has no MCP servers", async () => {
+    const configHome = await makeConfigHome({ theme: "system" });
+    const prepared = await prepareOpenCodeRuntimeConfig({
+      env: { XDG_CONFIG_HOME: configHome },
+      config: {},
+      runtimeMcpServers: [],
+    });
+    cleanupPaths.add(prepared.env.XDG_CONFIG_HOME);
+    const config = await readRuntimeConfig(prepared);
+    expect(config).not.toHaveProperty("mcp");
+    await prepared.cleanup();
+  });
+});

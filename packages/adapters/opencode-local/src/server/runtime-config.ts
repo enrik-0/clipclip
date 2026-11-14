@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { asBoolean } from "@paperclipai/adapter-utils/server-utils";
+import type { AdapterRuntimeMcpServer } from "@paperclipai/adapter-utils";
 import { installSandboxToolMemoryPreference } from "./sandbox-tool-memory.js";
 
 type PreparedOpenCodeRuntimeConfig = {
@@ -104,11 +105,66 @@ async function readJsonObject(filepath: string): Promise<Record<string, unknown>
   }
 }
 
+function mcpServerKeys(mcp: unknown): string[] {
+  if (!isPlainObject(mcp)) return [];
+  return [...Object.keys(mcp), ...(usesServersLayout(mcp) ? Object.keys(mcp.servers as object) : [])];
+}
+
+// OpenCode 2.x documents `mcp.servers.<name>`; 1.x keys servers directly under
+// `mcp`, and 2.x still reads (and migrates) that layout. Follow the operator's
+// layout when it already uses `servers`, otherwise use the layout both read.
+function usesServersLayout(mcp: Record<string, unknown>): boolean {
+  const servers = mcp.servers;
+  return isPlainObject(servers) && !("type" in servers) && !("enabled" in servers);
+}
+
+function openCodeMcpServerName(name: string): string {
+  // OpenCode names tools `<server>_<tool>` after replacing characters other than
+  // letters, digits, `_` and `-`; keep the key in that alphabet so it stays stable.
+  return name.toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^[_-]+|[_-]+$/g, "") || "paperclip_mcp";
+}
+
+/**
+ * Adds the run's Paperclip MCP gateways as remote OpenCode servers. Operator
+ * servers keep their names; a run server whose name is taken gets a suffix.
+ */
+function mergeRuntimeMcpServers(input: {
+  mcp: unknown;
+  inlineMcp: unknown;
+  servers: AdapterRuntimeMcpServer[];
+}): { mcp: Record<string, unknown>; names: string[] } {
+  const mcp = isPlainObject(input.mcp) ? { ...input.mcp } : {};
+  const useServers = usesServersLayout(mcp);
+  const target: Record<string, unknown> = useServers ? { ...(mcp.servers as Record<string, unknown>) } : mcp;
+  const taken = new Set([...mcpServerKeys(mcp), ...mcpServerKeys(input.inlineMcp)]);
+  const names: string[] = [];
+  for (const server of input.servers) {
+    const base = openCodeMcpServerName(server.name);
+    const connectionSlug = openCodeMcpServerName(server.connectionId.split(/[^A-Za-z0-9]/)[0] ?? "").slice(0, 12);
+    let name = base;
+    if (taken.has(name)) name = `${base}_${connectionSlug}`;
+    for (let suffix = 2; taken.has(name); suffix += 1) name = `${base}_${connectionSlug}_${suffix}`;
+    taken.add(name);
+    names.push(name);
+    target[name] = {
+      type: "remote",
+      url: server.url,
+      headers: { Authorization: `Bearer ${server.token}` },
+      // The run token is a static bearer credential; never start an OAuth flow.
+      oauth: false,
+    };
+  }
+  if (useServers) mcp.servers = target;
+  return { mcp, names };
+}
+
 export async function prepareOpenCodeRuntimeConfig(input: {
   env: Record<string, string>;
   config: Record<string, unknown>;
   targetIsRemote?: boolean;
   sandboxToolOomPreference?: boolean;
+  /** Run-scoped Paperclip MCP gateways; the bearer tokens stay in the runtime config file only. */
+  runtimeMcpServers?: AdapterRuntimeMcpServer[];
 }): Promise<PreparedOpenCodeRuntimeConfig> {
   const skipPermissions = asBoolean(input.config.dangerouslySkipPermissions, true);
 
@@ -229,7 +285,20 @@ export async function prepareOpenCodeRuntimeConfig(input: {
     nextConfig.small_model = smallModel;
     notes.push(`Pinned OpenCode small_model to ${smallModel}.`);
   }
-  await fs.writeFile(runtimeConfigPath, `${JSON.stringify(nextConfig, null, 2)}\n`, "utf8");
+  const runtimeMcpServers = input.runtimeMcpServers ?? [];
+  if (runtimeMcpServers.length > 0) {
+    const merged = mergeRuntimeMcpServers({
+      mcp: existingConfig.mcp,
+      inlineMcp: inlineConfig?.mcp,
+      servers: runtimeMcpServers,
+    });
+    nextConfig.mcp = merged.mcp;
+    notes.push(
+      `Added ${merged.names.length} Paperclip run MCP server(s) to the runtime OpenCode config: ${merged.names.join(", ")}.`,
+    );
+  }
+  // The file can hold run bearer tokens: keep it owner-only (no effect on Windows ACLs).
+  await fs.writeFile(runtimeConfigPath, `${JSON.stringify(nextConfig, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
   if (input.sandboxToolOomPreference) {
     try {
       await installSandboxToolMemoryPreference(runtimeConfigDir);
