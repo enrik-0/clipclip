@@ -63,6 +63,7 @@ import {
 import { removeMaintainerOnlySkillSymlinks } from "@paperclipai/adapter-utils/server-utils";
 import { apiKeyBillingType } from "@paperclipai/adapter-utils/api-billing-type";
 import { prepareOpenCodeRuntimeConfig, prepareManagedOpenCodeRemoteHomes } from "./runtime-config.js";
+import { detectOpenCodeCliVersion, openCodeCliUsesBackgroundService } from "./cli-version.js";
 import { SANDBOX_INSTALL_COMMAND } from "../index.js";
 import { resolveOpenCodeSkillsHome } from "./skills.js";
 
@@ -370,12 +371,23 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       includeRuntimeKeys: ["HOME"],
       resolvedCommand,
     });
+    // Remote targets keep the 1.x arguments; detecting their CLI version needs a remote probe.
+    const cliVersion = executionTargetIsRemote
+      ? null
+      : await detectOpenCodeCliVersion({ command, cwd, env: runtimeEnv });
+    const useStandaloneCli = openCodeCliUsesBackgroundService(cliVersion);
+    if (useStandaloneCli) {
+      // 2.x has no `run --dir`; it uses the process working directory, and
+      // prefers an inherited PWD, so pin PWD to the workspace.
+      preparedRuntimeConfig.env.PWD = effectiveExecutionCwd;
+    }
     if (!executionTargetIsRemote) {
       await ensureOpenCodeModelConfiguredAndAvailable({
         model,
         command,
         cwd,
         env: runtimeEnv,
+        standalone: useStandaloneCli,
       });
     }
 
@@ -552,6 +564,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
     const commandNotes = (() => {
       const notes = [...preparedRuntimeConfig.notes];
+      if (useStandaloneCli && cliVersion) {
+        notes.push(
+          `Detected OpenCode CLI ${cliVersion.version}; running with --standalone so the run config applies, model#variant and the workspace as working directory.`,
+        );
+      }
       if (!resolvedInstructionsFilePath) return notes;
       if (instructionsPrefix.length > 0) {
         notes.push(`Loaded agent instructions from ${resolvedInstructionsFilePath}`);
@@ -621,16 +638,21 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       env.PAPERCLIP_OPENCODE_PRINT_LOGS ?? process.env.PAPERCLIP_OPENCODE_PRINT_LOGS,
     );
     const buildArgs = (resumeSessionId: string | null) => {
-      const args = ["run", "--format", "json"];
+      // 2.x: a private server reads this run's config instead of the shared service.
+      const args = useStandaloneCli ? ["run", "--standalone", "--format", "json"] : ["run", "--format", "json"];
       if (printLogs) args.push("--print-logs");
       if (resumeSessionId) args.push("--session", resumeSessionId);
-      if (model) args.push("--model", model);
-      if (variant) args.push("--variant", variant);
+      if (useStandaloneCli) {
+        if (model) args.push("--model", variant ? `${model}#${variant}` : model);
+      } else {
+        if (model) args.push("--model", model);
+        if (variant) args.push("--variant", variant);
+      }
       // OpenCode prefers the inherited PWD over process.cwd(). Use the realized
       // workspace unless the operator already selected a directory explicitly.
       const optionTerminator = extraArgs.indexOf("--");
       const extraOptionArgs = optionTerminator === -1 ? extraArgs : extraArgs.slice(0, optionTerminator);
-      if (!extraOptionArgs.some((arg) => arg === "--dir" || arg.startsWith("--dir="))) {
+      if (!useStandaloneCli && !extraOptionArgs.some((arg) => arg === "--dir" || arg.startsWith("--dir="))) {
         args.push("--dir", effectiveExecutionCwd);
       }
       if (extraArgs.length > 0) args.push(...extraArgs);
