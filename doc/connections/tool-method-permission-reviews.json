@@ -406,6 +406,20 @@
       "keyPermissions": "Modify documents/tables permitted by the account. Create a key with read and write permissions for these actions; Paperclip cannot increase an existing key\u2019s permissions."
     },
     {
+      "app": "obsidian",
+      "method": "vault",
+      "auth": "none",
+      "policy": "no-credential",
+      "requestedScopes": [],
+      "capability": "local-folder",
+      "supportedActions": "Search, read, create, edit, move and delete Markdown notes in one vault folder on the runtime host. A read-only connection offers only the search and read tools.",
+      "evidence": [
+        "https://github.com/bitbonsai/mcpvault"
+      ],
+      "reviewedAt": "2026-11-14",
+      "liveProof": "local-run"
+    },
+    {
       "app": "cognee",
       "method": "cloud-local",
       "auth": "api_key",
