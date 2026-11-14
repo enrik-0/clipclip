@@ -133,6 +133,28 @@ function readServerTools(command, args) {
   });
 }
 
+// mcpvault tools that only read. Paperclip reads a tool with no hint as a read,
+// and mcpvault does not mark its writing tools, so the tier is stated here.
+const READ_ONLY_TOOLS = new Set([
+  "read_note", "read_note_lines", "read_multiple_notes", "get_note_outline", "list_directory", "search_notes",
+  "get_frontmatter", "get_notes_info", "get_vault_stats", "list_all_tags", "wiki_link",
+]);
+const DESTRUCTIVE_TOOLS = new Set(["delete_note"]);
+
+/**
+ * The permission tier Paperclip derives from the annotations. A tool that is
+ * not a known read is a write, whatever the server says: an unknown tool must
+ * never be granted as a harmless read.
+ */
+function tierAnnotations(tool) {
+  const declared = tool.annotations && typeof tool.annotations === "object" ? tool.annotations : {};
+  if (DESTRUCTIVE_TOOLS.has(tool.name) || declared.destructiveHint === true) {
+    return { ...declared, readOnlyHint: false, destructiveHint: true };
+  }
+  if (READ_ONLY_TOOLS.has(tool.name)) return { ...declared, readOnlyHint: true, destructiveHint: false };
+  return { ...declared, readOnlyHint: false, destructiveHint: false };
+}
+
 /** Paperclip stores the descriptor; the gateway uses it for the catalog and the permission tier. */
 function toTemplateTool(tool) {
   return {
@@ -140,7 +162,7 @@ function toTemplateTool(tool) {
     ...(tool.title ? { title: String(tool.title).slice(0, 240) } : {}),
     ...(tool.description ? { description: String(tool.description).slice(0, 8000) } : {}),
     ...(tool.inputSchema ? { inputSchema: tool.inputSchema } : {}),
-    ...(tool.annotations ? { annotations: tool.annotations } : {}),
+    annotations: tierAnnotations(tool),
   };
 }
 
@@ -181,7 +203,7 @@ async function main() {
     command, args, envKeys: [], tools,
   };
   const connection = {
-    name: options.name, transport: "local_stdio", authKind: "none", enabled: true,
+    name: options.name, transport: "local_stdio", authKind: "none", enabled: true, status: "active",
     config: { templateId },
   };
 
@@ -192,7 +214,10 @@ async function main() {
   }
   const createdTemplate = await request(options, "POST", `/companies/${options.company}/tools/stdio-templates`, template);
   const createdConnection = await request(options, "POST", `/companies/${options.company}/tools/connections`, connection);
-  process.stdout.write(`\nTemplate: ${createdTemplate.templateId}\nConnection: ${createdConnection.id ?? createdConnection.connection?.id ?? "created"}\n`
+  const connectionId = createdConnection.id ?? createdConnection.connection?.id;
+  // The tool catalog stays empty until the first refresh; agents see no tools before it.
+  if (connectionId) await request(options, "POST", `/tool-connections/${connectionId}/catalog/refresh`, {});
+  process.stdout.write(`\nTemplate: ${createdTemplate.templateId}\nConnection: ${connectionId ?? "created"}\n`
     + "Next: open Apps in Paperclip, open the connection, and choose which agents can use which tools.\n");
 }
 

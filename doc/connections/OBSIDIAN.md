@@ -91,6 +91,12 @@ it, or leave it out of every agent's tools.
 The script reads the tool list from the installed server, so the registered
 tools match the installed version.
 
+The script states each tool's permission tier. mcpvault does not mark its
+writing tools, and Paperclip reads a tool with no hint as a read. Without the
+explicit tier, `patch_note`, `move_note`, `move_file` and `manage_tags` would be
+offered as harmless reads. A tool the script does not know is registered as a
+write.
+
 ### Safety
 
 - The vault path is fixed in the template. An agent cannot point the server at
@@ -113,7 +119,17 @@ tools match the installed version.
 
 ### Verification status
 
-The script was run with `--dry-run` against the repository's stdio MCP fixture:
-the MCP handshake, the tool list, the payloads and the root-path refusal work.
-It has not been run against a real `@bitbonsai/mcpvault` install or a live
-Paperclip instance.
+Checked on 2026-11-14 on Windows 11, with `@bitbonsai/mcpvault@0.18.3` and a
+vault in `C:\Users\<user>\Documents\Obsidian Vault` (a path with a space),
+against an isolated local Paperclip instance:
+
+- The script created the template and the connection. The connection was
+  active and its health check passed.
+- The catalog held 18 tools: 11 read, 6 write, 1 destructive.
+- Test calls through the gateway worked for `get_vault_stats`, `read_note`,
+  `write_note`, `update_frontmatter`, `patch_note`, `manage_tags` and
+  `search_notes`.
+
+Not checked: a call from a running agent, and `delete_note`, `move_note` and
+`move_file`. The script's own catalog refresh call was added after this run; the
+same endpoint was called by hand in it.
