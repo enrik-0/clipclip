@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { OBSIDIAN_VAULT_TOOLS } from "./obsidian-vault-tools.generated.js";
 
 /**
@@ -65,10 +65,15 @@ let cachedEntry: string | null = null;
 /** The stdio entry file of the bundled MCP server. */
 function mcpServerEntry(): string {
   if (cachedEntry) return cachedEntry;
-  const require = createRequire(import.meta.url);
-  let manifestPath: string;
-  try { manifestPath = require.resolve(`${MCP_PACKAGE}/package.json`); }
-  catch {
+  // The package's `exports` hide its manifest from module resolution, so find
+  // the installed folder the way Node does: nearest node_modules first.
+  let manifestPath: string | null = null;
+  for (let dir = path.dirname(fileURLToPath(import.meta.url)); ; dir = path.dirname(dir)) {
+    const candidate = path.join(dir, "node_modules", ...MCP_PACKAGE.split("/"), "package.json");
+    if (existsSync(candidate)) { manifestPath = candidate; break; }
+    if (path.dirname(dir) === dir) break;
+  }
+  if (!manifestPath) {
     throw new ObsidianVaultConfigError("The Obsidian MCP server is not installed with Paperclip.", "obsidian_mcp_server_missing");
   }
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { bin?: string | Record<string, string>; main?: string };
