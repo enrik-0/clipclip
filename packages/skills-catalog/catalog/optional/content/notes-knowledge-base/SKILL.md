@@ -1,6 +1,6 @@
 ---
 name: notes-knowledge-base
-description: Use the company's note tool (Obsidian vault or Notion) as a knowledge base — look up procedures and context before work, and file deliverables as well-formed notes after it.
+description: Use the company's notes (an Obsidian vault or Notion) as a knowledge base and as durable memory — look up procedures and context before work, file deliverables as well-formed notes, and record what is worth remembering.
 key: paperclipai/optional/content/notes-knowledge-base
 recommendedForRoles:
   - engineer
@@ -10,6 +10,7 @@ recommendedForRoles:
   - operations
 tags:
   - knowledge
+  - memory
   - notes
   - obsidian
   - notion
@@ -22,8 +23,35 @@ The company keeps procedures, decisions and reference material in a note tool.
 Your Obsidian or Notion connection gives you tools to search, read and write
 those notes. Use them together with your other sources.
 
+This skill covers three uses: looking things up, filing deliverables, and
+keeping memory. It does not cover turning notes into tasks or mirroring task
+status into notes; do not build that by hand from this skill.
+
 If you have no note tools in this run, say so in your task comment and continue
 with the sources you have. Do not guess what a note says.
+
+## Tools
+
+With an Obsidian vault connection:
+
+| Need | Tool |
+| --- | --- |
+| Find notes on a subject | `search_notes` |
+| See what a folder holds | `list_directory` |
+| Read a note | `read_note`; `read_multiple_notes` for several |
+| Read part of a long note | `get_note_outline`, then `read_note_lines` |
+| Read properties and tags | `get_frontmatter`, `list_all_tags` |
+| Create a note | `write_note` |
+| Change part of a note | `patch_note` |
+| Change properties or tags | `update_frontmatter`, `manage_tags` |
+| Link to another note | `wiki_link` |
+
+A read-only connection has only the search and read tools. You may have more
+than one vault connection; each is a different vault, so check which one holds
+what before you write.
+
+With Notion, use the search, fetch, create and update tools of that connection
+in the same way.
 
 ## Before you start work
 
@@ -83,6 +111,42 @@ decision record or procedure, and you have write tools.
 
 Prefer a tool that edits part of a note over one that replaces the whole note.
 Replacing a note loses changes a person made since you read it.
+
+## Keeping memory
+
+The notes are also where knowledge survives between your runs and reaches other
+agents. You do not remember earlier runs; what you write here is what the next
+run finds.
+
+**Record** what would change how the work is done next time:
+
+- A decision and its reason: "We bill annual plans in January because the tax
+  filing closes in December."
+- A fact that took effort to find: where a setting lives, who owns a system,
+  which approach failed and why.
+- A correction from a person: what they asked for instead, and to what it applies.
+- A recurring pitfall and how to avoid it.
+
+**Do not record** task status or progress, a summary of what you just did,
+anything the task or the repository already states, secrets or credentials, or
+personal data about people.
+
+**How to record it:**
+
+1. Search first. If a note already covers the subject, add to it or correct it.
+   One current note is worth more than five partial ones.
+2. Put a memory where a person would look for it: with the notes on that
+   subject, not in a pile of agent notes. Use a separate memory folder only
+   when the vault already has one.
+3. Write one fact or decision per entry, in a full sentence that makes sense
+   alone, with its date and the task it came from.
+4. When a memory turns out to be wrong or out of date, fix or remove it. Do not
+   leave it beside a newer entry that contradicts it.
+5. Mark what you are not sure of as unverified. A wrong fact stated with
+   confidence costs more than a missing one.
+
+**Before you rely on a memory**, check that it still holds when the cost of
+being wrong is high: look at the current code, setting or task.
 
 ## Do not
 
