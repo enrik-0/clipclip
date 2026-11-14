@@ -355,6 +355,12 @@
       "localAsset": "/brands/apps/notion.svg"
     },
     {
+      "slug": "obsidian",
+      "provider": "Obsidian",
+      "catalogVisible": true,
+      "localAsset": "/brands/apps/obsidian.svg"
+    },
+    {
       "slug": "oreilly",
       "provider": "O'Reilly",
       "catalogVisible": false,
