@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "packageName": "@paperclipai/skills-catalog",
   "packageVersion": "0.3.1",
-  "generatedAt": "2026-11-09T20:56:52.178Z",
+  "generatedAt": "2026-11-14T01:30:04.556Z",
   "skills": [
     {
       "id": "paperclipai:bundled:docs:doc-maintenance",
@@ -449,6 +449,44 @@
         }
       ],
       "contentHash": "sha256:eabb2c9f7b5e1a27ebb1e05a711d61433a266478154cd671a685e99e67aadea2"
+    },
+    {
+      "id": "paperclipai:optional:content:notes-knowledge-base",
+      "key": "paperclipai/optional/content/notes-knowledge-base",
+      "kind": "optional",
+      "category": "content",
+      "slug": "notes-knowledge-base",
+      "name": "notes-knowledge-base",
+      "description": "Use the company's note tool (Obsidian vault or Notion) as a knowledge base — look up procedures and context before work, and file deliverables as well-formed notes after it.",
+      "path": "catalog/optional/content/notes-knowledge-base",
+      "entrypoint": "SKILL.md",
+      "trustLevel": "markdown_only",
+      "compatibility": "compatible",
+      "defaultInstall": false,
+      "recommendedForRoles": [
+        "engineer",
+        "product",
+        "writer",
+        "researcher",
+        "operations"
+      ],
+      "requires": [],
+      "tags": [
+        "knowledge",
+        "notes",
+        "obsidian",
+        "notion",
+        "documentation"
+      ],
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "skill",
+          "sizeBytes": 3633,
+          "sha256": "2ed0844e16027682615917f3fd3b190c1c62eb1374bbd3b7a7e446121ee8d25b"
+        }
+      ],
+      "contentHash": "sha256:56d956ebd22dc8f75f2798dd124aa9a6edabef2beade323180729d4ae895202a"
     },
     {
       "id": "paperclipai:optional:content:release-announcement",
