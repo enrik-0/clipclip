@@ -35,11 +35,14 @@ with its own name, folder and permissions. A common setup is a read-only
 connection to a shared procedures vault and a writing connection to a vault for
 deliverables.
 
-Give the agents the `notes-knowledge-base` skill from the skills catalog. The
-guidance on how to use the notes lives in that skill: looking up procedures,
-filing deliverables, and keeping memory. The connector's own agent instructions
-only point to it. Turning notes into tasks and mirroring task status is not
-part of that skill; it would be a separate one.
+Agents get the `obsidian-notes` skill automatically. Paperclip adds it to every
+run of an agent that may use at least one vault, and lists that agent's vaults
+in it. Nobody assigns it by hand, and it is not saved in the agent's skill
+preferences. The guidance on how to use the notes lives in that skill
+(`skills/obsidian-notes/SKILL.md`): looking up procedures, filing deliverables,
+and keeping memory. The connector's own agent instructions only point to it.
+Turning notes into tasks and mirroring task status is not part of that skill;
+it would be a separate one.
 
 ### Why this server
 

@@ -34,7 +34,7 @@ import { browserUseService } from "./browser-use.js";
 import { isBrowserUseConnection } from "./browser-use-client.js";
 import { COGNEE_STDIO_TEMPLATE, cogneeCloudUrl, callCogneeCloud } from "./cognee-connection.js";
 import {
-  OBSIDIAN_STDIO_TEMPLATE, OBSIDIAN_VAULT_TEMPLATE_ID, ObsidianVaultConfigError, obsidianVaultCommand,
+  OBSIDIAN_STDIO_TEMPLATE, OBSIDIAN_VAULT_APP_SLUG, OBSIDIAN_VAULT_TEMPLATE_ID, ObsidianVaultConfigError, obsidianVaultCommand,
 } from "./obsidian-connection.js";
 import { HttpError } from "../errors.js";
 import { authorizationService, canActorReadIssuePrivacy, type AuthorizationActor } from "./authorization.js";
@@ -9801,6 +9801,29 @@ export function createToolGatewayService(
         try { await measureRunPhase("connectors.browser_use.grant", () => resolveConnectionGrant(session, connection, false)); resources.push({ id: connection.id, connectionId: connection.id, label: "Browser Use Cloud" }); } catch { /* Unavailable grants do not contribute a runtime skill. */ }
       }
       return resources;
+    },
+
+    /** The Obsidian vault connections whose tools this agent may use in this run. */
+    async obsidianVaultResources(binding: { companyId: string; agentId: string; runId?: string; issueId?: string }) {
+      if (!binding.runId || !binding.issueId) return [];
+      const connections = await db.select({ id: toolConnections.id, name: toolConnections.name, config: toolConnections.config })
+        .from(toolConnections).where(and(
+          eq(toolConnections.companyId, binding.companyId), eq(toolConnections.transport, "local_stdio"),
+          eq(toolConnections.enabled, true), eq(toolConnections.status, "active"),
+          sql`${toolConnections.config}->>'sourceTemplateKey' = ${OBSIDIAN_VAULT_APP_SLUG}`,
+        )).orderBy(toolConnections.name, toolConnections.id);
+      if (!connections.length) return [];
+      const session: ToolGatewaySession = { ...binding, runId: binding.runId, issueId: binding.issueId, id: randomUUID(), token: "", projectId: null, createdAt: new Date(), expiresAt: new Date(Date.now() + 60000) };
+      await assertAgentInCompany(binding.companyId, binding.agentId);
+      if (await githubGuestBotConnectionForSession(db, session)) return [];
+      const candidates = await connectedMcpToolsForCompany(binding.companyId, connections.map(connection => connection.id));
+      const decisions = await decideToolsForListing(candidates, tool => policyInputForTool({ session, tool }));
+      const visible = new Set(decisions.filter(({ decision }) => decision.allowed || decision.decision === "require_approval")
+        .map(({ tool }) => tool.connectionId));
+      return connections.filter(connection => visible.has(connection.id)).map(connection => ({
+        id: connection.id, connectionId: connection.id, label: connection.name,
+        metadata: { readOnly: asRecord(asRecord(connection.config)?.methodConfig)?.readOnly === true },
+      }));
     },
 
     async summarizeConnectionAccessForAgent(input: {

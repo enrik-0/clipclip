@@ -1,38 +1,25 @@
 ---
-name: notes-knowledge-base
-description: Use the company's notes (an Obsidian vault or Notion) as a knowledge base and as durable memory — look up procedures and context before work, file deliverables as well-formed notes, and record what is worth remembering.
-key: paperclipai/optional/content/notes-knowledge-base
-recommendedForRoles:
-  - engineer
-  - product
-  - writer
-  - researcher
-  - operations
-tags:
-  - knowledge
-  - memory
-  - notes
-  - obsidian
-  - notion
-  - documentation
+name: obsidian-notes
+description: Use the assigned Obsidian vaults as the company's knowledge base and durable memory — look up procedures and context before work, file deliverables as well-formed notes, and record what is worth remembering.
 ---
 
-# Notes knowledge base
+# Obsidian notes
 
-The company keeps procedures, decisions and reference material in a note tool.
-Your Obsidian or Notion connection gives you tools to search, read and write
+The company keeps procedures, decisions and reference material in Obsidian
+vaults. Your Obsidian connections give you tools to search, read and write
 those notes. Use them together with your other sources.
+
+Paperclip gives you this skill because you have access to at least one vault.
+The vaults you can use are listed under "Assigned resources" at the end.
 
 This skill covers three uses: looking things up, filing deliverables, and
 keeping memory. It does not cover turning notes into tasks or mirroring task
 status into notes; do not build that by hand from this skill.
 
-If you have no note tools in this run, say so in your task comment and continue
-with the sources you have. Do not guess what a note says.
+If a note tool fails or is not offered in this run, say so in your task comment
+and continue with the sources you have. Do not guess what a note says.
 
 ## Tools
-
-With an Obsidian vault connection:
 
 | Need | Tool |
 | --- | --- |
@@ -46,12 +33,12 @@ With an Obsidian vault connection:
 | Change properties or tags | `update_frontmatter`, `manage_tags` |
 | Link to another note | `wiki_link` |
 
-A read-only connection has only the search and read tools. You may have more
-than one vault connection; each is a different vault, so check which one holds
-what before you write.
+Find the tools in the governed tool catalog under each vault's connection. They
+follow that connection's Allowed / Ask first / Off permissions.
 
-With Notion, use the search, fetch, create and update tools of that connection
-in the same way.
+A read-only vault has only the search and read tools. You may have more than
+one vault; each is a different set of notes, so check which one holds what
+before you write.
 
 ## Before you start work
 
@@ -62,7 +49,7 @@ in the same way.
    procedure followed halfway is worse than none.
 3. Follow links to related notes when the note points to them for a step.
 4. Check how old the note is. Frontmatter fields such as `updated`, `status` or
-   `deprecated`, or a Notion "Last edited" date, tell you. When a note and the
+   `deprecated` tell you. When a note and the
    current code or task disagree, the task instructions win; report the
    disagreement.
 
@@ -87,11 +74,11 @@ decision record or procedure, and you have write tools.
 
 1. Look for an existing note on the same subject first. Update it instead of
    creating a near duplicate.
-2. Put the note where similar notes live. Look at the folder or database
+2. Put the note where similar notes live. Look at the folder
    structure before you choose. If nothing fits, ask in the task comment where
    it belongs rather than inventing a top-level folder.
 3. Give it a specific title: "Refund procedure for annual plans", not "Notes".
-4. In Obsidian, start with frontmatter that matches the vault's existing notes.
+4. Start with frontmatter that matches the vault's existing notes.
    When the vault has no convention, use:
 
    ```yaml
@@ -105,8 +92,7 @@ decision record or procedure, and you have write tools.
 
 5. Write for a reader who was not in the task: state the conclusion first, then
    the evidence, then what remains open.
-6. Link to the notes you used, with wiki links in Obsidian or page mentions in
-   Notion.
+6. Link to the notes you used, with wiki links.
 7. Put the note's path or link in your task comment.
 
 Prefer a tool that edits part of a note over one that replaces the whole note.

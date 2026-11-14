@@ -61,14 +61,21 @@ interface ConnectorDefinition {
   ) => Promise<unknown>;
 }
 
+// Loaded on first use: the gateway module imports this one. Connectors resolve
+// together, so they share one load.
+let assignedMcpToolsModule: Promise<typeof import("./native-runtime/assigned-mcp-tools.js")> | null = null;
+async function assignedMcpGateway(db: Db) {
+  assignedMcpToolsModule ??= import("./native-runtime/assigned-mcp-tools.js");
+  return (await assignedMcpToolsModule).getAssignedMcpGateway(db);
+}
+
 // Trusted connector packages declare their contributions here. Assignments and
 // current access, not credential availability or agent-authored config, select them.
 const connectors: ConnectorDefinition[] = [
   { key: "browser-use-cloud", resolvePhase: "connectors.browser_use.resolve", label: "Browser Use Cloud", skillName: "browser-use-cloud", skillMarkdown: BROWSER_USE_CLOUD_SKILL, tools: [],
     legacySkillKeys: ["paperclipai/paperclip/browser-use"],
     async resolve(db, binding) {
-      const { getAssignedMcpGateway } = await import("./native-runtime/assigned-mcp-tools.js");
-      try { return await getAssignedMcpGateway(db).browserUseResources(binding); } catch { return []; }
+      try { return await (await assignedMcpGateway(db)).browserUseResources(binding); } catch { return []; }
     },
     async execute() { throw forbidden("Use Browser Use Cloud through the connection tool gateway."); },
   },
@@ -76,6 +83,13 @@ const connectors: ConnectorDefinition[] = [
     tools: [], // Native phone tools keep their existing governed gateway transport.
     resolve: spekoAssignedResources,
     async execute() { throw forbidden("Use Speko through the connection tool gateway."); },
+  },
+  // Vault tools go through the governed tool catalog; this entry only supplies the skill.
+  { key: "obsidian", resolvePhase: "connectors.obsidian.resolve", label: "Obsidian", skillName: "obsidian-notes", tools: [],
+    async resolve(db, binding) {
+      try { return await (await assignedMcpGateway(db)).obsidianVaultResources(binding); } catch { return []; }
+    },
+    async execute() { throw forbidden("Use Obsidian through the connection tool gateway."); },
   },
   { key: "slack", resolvePhase: "connectors.slack.resolve", label: "Slack", skillName: "slack",
     tools: SLACK_TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
@@ -196,16 +210,23 @@ export async function applyConnectorSkills(
     const connector = connectors.find((entry) => entry.key === assignment.key)!;
     let markdown = connector.skillMarkdown;
     if (markdown === undefined) {
-      const root = await resolvePaperclipSkillsDir(
-        path.dirname(fileURLToPath(import.meta.url)),
-        [fileURLToPath(new URL("../../../skills", import.meta.url))],
-      );
-      if (!root)
-        throw new Error(`Bundled connector skill is missing: ${connector.key}`);
-      markdown = await fs.readFile(
-        path.join(root, connector.skillName, "SKILL.md"),
-        "utf8",
-      );
+      // The repository's own skills folder first: a checkout nested under a
+      // folder that also has a `skills` directory must not read that one.
+      const sourceRoot = fileURLToPath(new URL("../../../skills", import.meta.url));
+      const sourceSkill = path.join(sourceRoot, connector.skillName, "SKILL.md");
+      markdown = await fs.readFile(sourceSkill, "utf8").catch(() => undefined);
+      if (markdown === undefined) {
+        const root = await resolvePaperclipSkillsDir(
+          path.dirname(fileURLToPath(import.meta.url)),
+          [sourceRoot],
+        );
+        if (!root)
+          throw new Error(`Bundled connector skill is missing: ${connector.key}`);
+        markdown = await fs.readFile(
+          path.join(root, connector.skillName, "SKILL.md"),
+          "utf8",
+        );
+      }
     }
     const toolRevision = createHash("sha256")
       .update(JSON.stringify(assignment.tools))
