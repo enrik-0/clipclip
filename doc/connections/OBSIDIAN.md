@@ -5,19 +5,38 @@ deliverables as notes. This page covers both note tools.
 
 ## Notion
 
-Notion is already in the Apps catalog (`packages/shared/src/app-definitions/notion.json`).
+Notion is in the Apps catalog (`packages/shared/src/app-definitions/notion.json`).
 It uses Notion's remote MCP server at `https://mcp.notion.com/mcp` with OAuth.
-Open **Apps**, choose **Notion**, and connect. No setup in this repository is
-needed.
+Open **Connectors**, choose **Notion**, and connect.
 
 ## Obsidian
 
-Obsidian has no cloud API. A vault is a folder of Markdown files on the
-computer. Paperclip reaches it through an existing MCP server that reads the
-folder directly: [`@bitbonsai/mcpvault`](https://github.com/bitbonsai/mcpvault).
-Obsidian does not need to be open, and no Obsidian plugin is needed.
+Obsidian has no cloud API. A vault is a folder of Markdown files on a computer.
+Paperclip reaches it through an existing MCP server that reads the folder
+directly: [`@bitbonsai/mcpvault`](https://github.com/bitbonsai/mcpvault), pinned
+as a server dependency. Obsidian does not need to be open, and no Obsidian
+plugin is needed.
 
 This works only when Paperclip runs on the computer that holds the vault.
+
+### Set up a vault
+
+1. Open **Connectors** and choose **Obsidian**.
+2. Enter the **Vault folder**: the full path of the vault on the computer that
+   runs Paperclip. In Obsidian, the vault switcher shows it.
+3. Optional: under the advanced options, turn on **Read only**. Agents can then
+   search and read notes but cannot change them.
+4. Connect. Paperclip checks that the folder exists.
+5. Choose which tools are allowed, which need approval, and which agents can use
+   the connection. Until this step is done, no agent has any of the tools.
+
+Repeat the steps for each vault. One company can connect several vaults, each
+with its own name, folder and permissions. A common setup is a read-only
+connection to a shared procedures vault and a writing connection to a vault for
+deliverables.
+
+Give the agents the `notes-knowledge-base` skill from the skills catalog. It
+tells them how to look up procedures and how to file notes.
 
 ### Why this server
 
@@ -31,51 +50,6 @@ This works only when Paperclip runs on the computer that holds the vault.
 
 Checked on 2026-11-14 against version `0.18.3` (Node 22.12 or later).
 
-### How it connects
-
-Paperclip runs a local stdio MCP server only from an approved command template.
-A board user registers a company template with the exact command, and a
-`local_stdio` connection uses it. No Paperclip code changes.
-
-The gateway starts the command without a shell, once for each tool call. For
-that reason the template runs `node <entry file> <vault>` from a local install.
-It does not run `npx`: on Windows `npx` cannot start without a shell, and it
-would also reach the network on every call.
-
-### Steps
-
-1. Install the server in a folder outside the vault. Pin the version.
-
-   ```sh
-   npm install --prefix "C:\Users\me\.paperclip-notes\mcpvault" @bitbonsai/mcpvault@0.18.3
-   ```
-
-2. Check what the script will register. This sends nothing.
-
-   ```sh
-   node experiments/notes/connect-obsidian.mjs --dry-run \
-     --vault "C:\Users\me\Notes" \
-     --server-dir "C:\Users\me\.paperclip-notes\mcpvault"
-   ```
-
-3. Register the template and the connection.
-
-   ```sh
-   node experiments/notes/connect-obsidian.mjs \
-     --company <companyId> \
-     --vault "C:\Users\me\Notes" \
-     --server-dir "C:\Users\me\.paperclip-notes\mcpvault"
-   ```
-
-   Add `--read-only` for a connection that cannot change notes. You can register
-   both: a read-only connection for most agents and a writing one for the agents
-   that file deliverables.
-
-4. In **Apps**, open the connection and choose which agents can use which tools.
-   A new connection gives no agent access by default.
-
-5. Give those agents the `notes-knowledge-base` skill from the skills catalog.
-
 ### Tools
 
 Read: `read_note`, `read_note_lines`, `read_multiple_notes`, `get_note_outline`,
@@ -88,25 +62,32 @@ Write: `write_note`, `patch_note`, `move_note`, `move_file`,
 Delete: `delete_note`. It deletes permanently by default. Require approval for
 it, or leave it out of every agent's tools.
 
-The script reads the tool list from the installed server, so the registered
-tools match the installed version.
+A read-only connection offers only the read tools.
 
-The script states each tool's permission tier. mcpvault does not mark its
-writing tools, and Paperclip reads a tool with no hint as a read. Without the
-explicit tier, `patch_note`, `move_note`, `move_file` and `manage_tags` would be
-offered as harmless reads. A tool the script does not know is registered as a
-write.
+### How it works
+
+- `packages/shared/src/app-definitions/obsidian.json` is the catalog entry. Its
+  source is `scripts/app-definition-overrides/obsidian.json`. The vault folder
+  and the read-only choice are connection settings, not credentials.
+- `server/src/services/obsidian-connection.ts` owns the provider logic: it
+  checks the vault folder and builds the command for one connection.
+- `server/src/services/obsidian-vault-tools.generated.ts` holds the tool list of
+  the pinned server version, with the permission tier of each tool. The server
+  marks no tool as read-only or destructive, and Paperclip reads an unmarked
+  tool as a read, so the tier is stated there. Regenerate the file when the
+  pinned version changes.
+- The tool gateway starts `node <server entry> <vault folder>` for each call,
+  without a shell. `npx` is not used: it cannot start without a shell on
+  Windows, and it would reach the network on every call.
 
 ### Safety
 
-- The vault path is fixed in the template. An agent cannot point the server at
+- The vault folder is a connection setting. An agent cannot point the server at
   another folder.
-- Use a folder, not a drive or share root. The script refuses a root. A root
-  also breaks `patch_note`, `update_frontmatter` and the tag tools in
-  `0.18.2` and later (mcpvault issue 281).
+- A drive or share root is refused. A root exposes far more than notes, and it
+  breaks `patch_note`, `update_frontmatter` and the tag tools in `0.18.2` and
+  later (mcpvault issue 281).
 - Keep the vault in version control or a synced backup before agents write to it.
-- A template is a command that Paperclip runs on the host. Only a board user
-  with tools administration can create one, and creation is in the activity log.
 - Local stdio connections are refused in an authenticated public deployment
   without a trusted runtime host.
 
@@ -114,22 +95,22 @@ write.
 
 - Creating tasks from notes and mirroring task status into notes. Agents can
   read and write notes; no sync runs on its own.
-- A first-class catalog entry with its own setup screen. The script is the
-  setup path.
+- Editing the vault folder of an existing connection. Remove the connection and
+  add it again.
 
 ### Verification status
 
-Checked on 2026-11-14 on Windows 11, with `@bitbonsai/mcpvault@0.18.3` and a
-vault in `C:\Users\<user>\Documents\Obsidian Vault` (a path with a space),
-against an isolated local Paperclip instance:
+Checked on 2026-11-14 on Windows 11 against an isolated local Paperclip instance:
 
-- The script created the template and the connection. The connection was
-  active and its health check passed.
-- The catalog held 18 tools: 11 read, 6 write, 1 destructive.
-- Test calls through the gateway worked for `get_vault_stats`, `read_note`,
-  `write_note`, `update_frontmatter`, `patch_note`, `manage_tags` and
-  `search_notes`.
+- The catalog connect endpoint created two Obsidian connections in one company,
+  one of them read only. A folder that does not exist was refused with a clear
+  message.
+- The writing connection listed 18 tools: 11 read, 6 write, 1 destructive. The
+  read-only connection listed the 11 read tools.
+- After the permissions step, test calls through the gateway searched and read
+  notes in the read-only vault, and it had no `write_note` tool.
+- An earlier run on a real vault, in a path with a space, also exercised
+  `write_note`, `update_frontmatter`, `patch_note` and `manage_tags`.
 
-Not checked: a call from a running agent, and `delete_note`, `move_note` and
-`move_file`. The script's own catalog refresh call was added after this run; the
-same endpoint was called by hand in it.
+Not checked: the setup form in a browser, a call from a running agent, and
+`delete_note`, `move_note` and `move_file`.
