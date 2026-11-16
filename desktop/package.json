@@ -1,0 +1,16 @@
+{
+  "name": "@paperclipai/desktop",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Windows desktop shell for a local Paperclip instance",
+  "license": "MIT",
+  "type": "module",
+  "main": "src/main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"src/**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "electron": "45.3.3"
+  }
+}
