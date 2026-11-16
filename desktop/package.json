@@ -7,10 +7,15 @@
   "type": "module",
   "main": "src/main.mjs",
   "scripts": {
-    "start": "electron .",
+    "start": "node node_modules/electron/install.js && electron .",
     "test": "node --test \"src/**/*.test.mjs\""
   },
   "devDependencies": {
     "electron": "45.3.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron"
+    ]
   }
 }
