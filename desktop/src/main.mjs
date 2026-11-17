@@ -15,7 +15,17 @@ const startHidden = process.argv.includes("--hidden");
 app.setName("Paperclip Desktop");
 if (process.platform === "win32") app.setAppUserModelId("ai.paperclip.desktop");
 
-const config = resolveDesktopConfig({ env: process.env, desktopDir });
+const config = resolveDesktopConfig({
+  env: process.env,
+  desktopDir,
+  packaged: app.isPackaged
+    ? {
+        runtimeDir: path.join(process.resourcesPath, "runtime"),
+        userDataDir: app.getPath("userData"),
+        execPath: process.execPath,
+      }
+    : null,
+});
 
 let mainWindow = null;
 let tray = null;

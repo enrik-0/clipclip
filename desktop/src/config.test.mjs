@@ -107,3 +107,26 @@ test("honours the repository, env file, URL and Node overrides", () => {
   assert.equal(config.expectedUrl, "http://127.0.0.1:9999");
   assert.equal(config.nodePath, "C:/node/node.exe");
 });
+
+test("a packaged build runs its bundled server with Electron as Node and keeps its env file in the user data dir", () => {
+  const runtime = makeRepo({ "server/dist/index.js": "", "server/ui-dist/index.html": "" });
+  const userData = makeRepo({ ".env": "PORT=3777\n" });
+  const execPath = path.join(runtime, "Paperclip Desktop.exe");
+  const packaged = { runtimeDir: runtime, userDataDir: userData, execPath };
+  const config = resolveDesktopConfig({ env: {}, desktopDir: path.join(runtime, "app.asar"), packaged });
+  assert.equal(config.repoRoot, runtime);
+  assert.equal(config.serverMode, "dist");
+  assert.equal(config.nodePath, execPath);
+  assert.equal(config.serverEnv.ELECTRON_RUN_AS_NODE, "1");
+  assert.equal(config.envFile, path.join(userData, ".env"));
+  assert.equal(config.expectedUrl, "http://127.0.0.1:3777");
+  assert.equal(config.serverEnv.PAPERCLIP_UI_DEV_MIDDLEWARE, undefined);
+
+  const custom = resolveDesktopConfig({
+    env: { PAPERCLIP_DESKTOP_NODE: "node" },
+    desktopDir: path.join(runtime, "app.asar"),
+    packaged,
+  });
+  assert.equal(custom.nodePath, "node");
+  assert.equal(custom.serverEnv.ELECTRON_RUN_AS_NODE, undefined);
+});

@@ -39,10 +39,20 @@ function firstExisting(candidates, fsImpl) {
  * server. Values already present in `env` win over the env file, matching how
  * the server itself loads its env file.
  */
-export function resolveDesktopConfig({ env, desktopDir, fsImpl = fs }) {
-  const repoRoot = path.resolve(env.PAPERCLIP_DESKTOP_REPO_ROOT || path.join(desktopDir, ".."));
-  const envFile = path.resolve(env.PAPERCLIP_DESKTOP_ENV_FILE || path.join(repoRoot, ".paperclip", ".env"));
+export function resolveDesktopConfig({ env, desktopDir, fsImpl = fs, packaged = null }) {
+  // An installed build carries the compiled server in `packaged.runtimeDir`
+  // (resources/runtime) and keeps its env file in the per-user data directory
+  // instead of a repository checkout. It runs the server with the Electron
+  // executable acting as Node, so the machine does not need Node installed.
+  const repoRoot = path.resolve(
+    env.PAPERCLIP_DESKTOP_REPO_ROOT || packaged?.runtimeDir || path.join(desktopDir, ".."),
+  );
+  const defaultEnvFile = packaged
+    ? path.join(packaged.userDataDir, ".env")
+    : path.join(repoRoot, ".paperclip", ".env");
+  const envFile = path.resolve(env.PAPERCLIP_DESKTOP_ENV_FILE || defaultEnvFile);
   const serverEnv = { ...readEnvFile(envFile, fsImpl), ...env };
+  if (packaged && !env.PAPERCLIP_DESKTOP_NODE) serverEnv.ELECTRON_RUN_AS_NODE = "1";
 
   const sourceEntry = path.join(repoRoot, "server", "src", "index.ts");
   const distEntry = path.join(repoRoot, "server", "dist", "index.js");
@@ -75,10 +85,11 @@ export function resolveDesktopConfig({ env, desktopDir, fsImpl = fs }) {
     serverMode,
     serverEntry: serverMode === "dist" ? distEntry : sourceEntry,
     tsxLoader: serverMode === "source" ? tsxLoader : null,
-    nodePath: env.PAPERCLIP_DESKTOP_NODE || "node",
+    nodePath: env.PAPERCLIP_DESKTOP_NODE || (packaged ? packaged.execPath : "node"),
     expectedUrl,
     iconPath: firstExisting(
       [
+        path.join(desktopDir, "build", "icon.png"),
         path.join(repoRoot, "ui", "public", "android-chrome-192x192.png"),
         path.join(repoRoot, "ui", "public", "favicon-32x32.png"),
       ],

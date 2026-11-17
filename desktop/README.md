@@ -17,6 +17,24 @@ pnpm start
 Requisitos: Node en el `PATH` y las dependencias del repositorio instaladas (`pnpm install` en la raíz), igual que para
 `pnpm dev:server`. El servidor se ejecuta con ese Node, no con el de Electron.
 
+## Empaquetado (`.exe`)
+
+```sh
+pnpm build                  # en la raíz: compila servidor y UI
+cd desktop
+pnpm install --ignore-workspace
+pnpm pack                   # release/win-unpacked/Paperclip Desktop.exe (sin instalador)
+pnpm dist                   # instalador NSIS en release/
+```
+
+`pnpm stage` (lo ejecutan `pack` y `dist`) deja en `stage/server` el servidor compilado con sus dependencias de
+producción y la UI; electron-builder lo copia a `resources/runtime`. La app empaquetada ejecuta el servidor con el propio
+Electron como Node (`ELECTRON_RUN_AS_NODE=1`), así que no necesita Node ni el repositorio. Su archivo de entorno vive en
+`%APPDATA%\Paperclip Desktop\.env`.
+
+En Windows, `pnpm build` de la raíz necesita Git Bash como shell de scripts
+(`npm_config_script_shell`) salvo para `@paperclipai/paperclip-runner`, que se compila con el shell por defecto.
+
 ## Comportamiento
 
 - **Servidor propio o externo.** Si ya hay un Paperclip respondiendo en la URL esperada, la app se conecta a él y no lo
@@ -62,7 +80,7 @@ pnpm test
 
 ## Limitaciones conocidas
 
-- No hay instalador ni actualización automática: se ejecuta desde el repositorio.
+- No hay actualización automática ni firma de código (SmartScreen avisará al instalar).
 - En Windows, la librería del Postgres embebido lo detiene con `taskkill /f`. De forma intermitente puede quedar un
   proceso `postgres.exe` huérfano que impide el siguiente arranque ("pre-existing shared memory block is still in
   use"). El origen está en esa librería, no en esta app; se resuelve terminando ese proceso.
