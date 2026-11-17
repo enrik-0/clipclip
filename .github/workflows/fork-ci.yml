@@ -1,0 +1,38 @@
+name: Fork CI (Windows)
+
+# CI propia del fork. Corre en runners gratuitos de GitHub (Windows).
+# No depende de la infraestructura de upstream (paperclipai/paperclip).
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: typecheck, tests and build (windows)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable pnpm 9.15.4
+        run: corepack enable && corepack prepare pnpm@9.15.4 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Tests
+        run: pnpm test:run
+
+      - name: Build
+        run: pnpm build
