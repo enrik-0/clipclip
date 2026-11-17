@@ -1,0 +1,1 @@
+ALTER TABLE "companies" ADD COLUMN "activity_schedule" jsonb;

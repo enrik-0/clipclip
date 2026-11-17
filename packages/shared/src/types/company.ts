@@ -4,6 +4,7 @@ import type {
   IssueThreadInteractionResolverPolicy,
   PauseReason,
 } from "../constants.js";
+import type { CompanyActivitySchedule } from "../activity-schedule.js";
 
 export interface InteractionResolverKindGovernance {
   defaultPolicy?: IssueThreadInteractionResolverPolicy;
@@ -28,6 +29,8 @@ export interface Company {
   defaultResponsibleUserId: string | null;
   requireBoardApprovalForNewAgents: boolean;
   interactionResolverGovernance: InteractionResolverGovernance;
+  /** Weekly windows in which Paperclip may start work on its own; null sets no limit. */
+  activitySchedule: CompanyActivitySchedule | null;
   feedbackDataSharingEnabled: boolean;
   feedbackDataSharingConsentAt: Date | null;
   feedbackDataSharingConsentByUserId: string | null;

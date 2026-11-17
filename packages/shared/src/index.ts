@@ -306,6 +306,7 @@ export {
   type ConnectionSetupState,
 } from "./connection-setup-state.js";
 export { APP_DEFINITIONS } from "./app-definitions.generated.js";
+export * from "./activity-schedule.js";
 export * from "./google-workspace-connectors.js";
 export * from "./github-connectors.js";
 export * from "./asana-connectors.js";
