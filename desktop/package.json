@@ -11,7 +11,8 @@
     "test": "node --test \"src/**/*.test.mjs\""
   },
   "devDependencies": {
-    "electron": "45.3.3"
+    "electron": "45.3.3",
+    "electron-builder": "^26.18.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
