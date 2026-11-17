@@ -120,13 +120,14 @@ function discoveryCacheKey(
   command: string,
   cwd: string,
   env: Record<string, string>,
+  standalone = false,
 ) {
   const envKey = Object.entries(env)
     .filter(([key]) => !isVolatileEnvKey(key))
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => `${key}=${hashValue(value)}`)
     .join("\n");
-  return `${command}\n${cwd}\n${envKey}`;
+  return `${command}\n${cwd}\n${standalone ? "standalone" : "default"}\n${envKey}`;
 }
 
 function pruneExpiredDiscoveryCache(now: number) {
@@ -141,6 +142,8 @@ export async function discoverOpenCodeModels(
     cwd?: unknown;
     env?: unknown;
     refresh?: boolean;
+    /** OpenCode 2.x: list with a private server so the run's config is honored. */
+    standalone?: boolean;
   } = {},
 ): Promise<AdapterModel[]> {
   const command = resolveOpenCodeCommand(input.command);
@@ -175,7 +178,7 @@ export async function discoverOpenCodeModels(
     const result = await runChildProcess(
       `opencode-models-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       command,
-      ["models", ...(input.refresh ? ["--refresh"] : [])],
+      ["models", ...(input.refresh ? ["--refresh"] : []), ...(input.standalone ? ["--standalone"] : [])],
       {
         cwd,
         env: runtimeEnv,
@@ -214,18 +217,20 @@ export async function discoverOpenCodeModelsCached(
     command?: unknown;
     cwd?: unknown;
     env?: unknown;
+    standalone?: boolean;
   } = {},
 ): Promise<AdapterModel[]> {
   const command = resolveOpenCodeCommand(input.command);
   const cwd = asString(input.cwd, process.cwd());
   const env = normalizeEnv(input.env);
-  const key = discoveryCacheKey(command, cwd, env);
+  const standalone = input.standalone === true;
+  const key = discoveryCacheKey(command, cwd, env, standalone);
   const now = Date.now();
   pruneExpiredDiscoveryCache(now);
   const cached = discoveryCache.get(key);
   if (cached && cached.expiresAt > now) return cached.models;
 
-  const models = await discoverOpenCodeModels({ command, cwd, env });
+  const models = await discoverOpenCodeModels({ command, cwd, env, standalone });
   discoveryCache.set(key, { expiresAt: now + MODELS_CACHE_TTL_MS, models });
   return models;
 }
@@ -234,10 +239,12 @@ async function refreshOpenCodeModelsCached(input: {
   command?: unknown;
   cwd?: unknown;
   env?: unknown;
+  standalone?: boolean;
 }): Promise<AdapterModel[]> {
   const command = resolveOpenCodeCommand(input.command);
   const cwd = asString(input.cwd, process.cwd());
   const env = normalizeEnv(input.env);
+  const standalone = input.standalone === true;
   // OpenCode 1.18.17 uses `models --refresh` only to update its on-disk
   // models.dev cache. Its stdout is a confirmation message, not the refreshed
   // catalog, so enumerate once more after the refresh under the exact same
@@ -247,10 +254,11 @@ async function refreshOpenCodeModelsCached(input: {
     cwd,
     env,
     refresh: true,
+    standalone,
   });
-  const models = await discoverOpenCodeModels({ command, cwd, env });
+  const models = await discoverOpenCodeModels({ command, cwd, env, standalone });
   if (models.length > 0) {
-    discoveryCache.set(discoveryCacheKey(command, cwd, env), {
+    discoveryCache.set(discoveryCacheKey(command, cwd, env, standalone), {
       expiresAt: Date.now() + MODELS_CACHE_TTL_MS,
       models,
     });
@@ -269,6 +277,7 @@ export async function ensureOpenCodeModelConfiguredAndAvailable(input: {
   command?: unknown;
   cwd?: unknown;
   env?: unknown;
+  standalone?: boolean;
 }): Promise<AdapterModel[]> {
   const model = requireOpenCodeModelId(input.model);
 
@@ -292,6 +301,7 @@ export async function ensureOpenCodeModelConfiguredAndAvailable(input: {
       command: input.command,
       cwd: input.cwd,
       env: input.env,
+      standalone: input.standalone,
     });
   } catch (err) {
     // The availability probe is a best-effort pre-flight guard, not a gate. If
@@ -328,6 +338,7 @@ export async function ensureOpenCodeModelConfiguredAndAvailable(input: {
         command: input.command,
         cwd: input.cwd,
         env: input.env,
+        standalone: input.standalone,
       });
       if (refreshedModels.some((entry) => entry.id === model)) {
         return refreshedModels;

@@ -31,6 +31,7 @@ import { discoverOpenCodeModels, ensureOpenCodeModelConfiguredAndAvailable, requ
 import { parseOpenCodeJsonl } from "./parse.js";
 import { SANDBOX_INSTALL_COMMAND } from "../index.js";
 import { prepareOpenCodeRuntimeConfig, prepareManagedOpenCodeRemoteHomes } from "./runtime-config.js";
+import { detectOpenCodeCliVersion, openCodeCliUsesBackgroundService } from "./cli-version.js";
 
 function summarizeStatus(checks: AdapterEnvironmentCheck[]): AdapterEnvironmentTestResult["status"] {
   if (checks.some((check) => check.level === "error")) return "fail";
@@ -250,6 +251,11 @@ export async function testEnvironment(
 
     const canRunProbe =
       checks.every((check) => check.code !== "opencode_cwd_invalid" && check.code !== "opencode_command_unresolvable");
+    // Same CLI flavor rules as execute(): 2.x needs --standalone and model#variant.
+    const cliVersion = canRunProbe && !targetIsRemote
+      ? await detectOpenCodeCliVersion({ command, cwd, env: runtimeEnv })
+      : null;
+    const useStandaloneCli = openCodeCliUsesBackgroundService(cliVersion);
 
     let modelValidationPassed = false;
     const configuredModel = asString(config.model, "").trim();
@@ -286,7 +292,7 @@ export async function testEnvironment(
       modelValidationPassed = true;
     } else if (canRunProbe && configuredModel) {
       try {
-        const discovered = await discoverOpenCodeModels({ command, cwd, env: runtimeEnv });
+        const discovered = await discoverOpenCodeModels({ command, cwd, env: runtimeEnv, standalone: useStandaloneCli });
         if (discovered.length > 0) {
           checks.push({
             code: "opencode_models_discovered",
@@ -322,7 +328,7 @@ export async function testEnvironment(
       }
     } else if (!targetIsRemote && canRunProbe && !configuredModel) {
       try {
-        const discovered = await discoverOpenCodeModels({ command, cwd, env: runtimeEnv });
+        const discovered = await discoverOpenCodeModels({ command, cwd, env: runtimeEnv, standalone: useStandaloneCli });
         if (discovered.length > 0) {
           checks.push({
             code: "opencode_models_discovered",
@@ -361,6 +367,7 @@ export async function testEnvironment(
           command,
           cwd,
           env: runtimeEnv,
+          standalone: useStandaloneCli,
         });
         checks.push({
           code: "opencode_model_configured",
@@ -387,9 +394,14 @@ export async function testEnvironment(
       const variant = asString(config.variant, "").trim();
       const probeModel = configuredModel;
 
-      const args = ["run", "--format", "json"];
-      args.push("--model", probeModel);
-      if (variant) args.push("--variant", variant);
+      const args = useStandaloneCli ? ["run", "--standalone", "--format", "json"] : ["run", "--format", "json"];
+      if (useStandaloneCli) {
+        args.push("--model", variant ? `${probeModel}#${variant}` : probeModel);
+        runtimeEnv.PWD = runtimeCwd;
+      } else {
+        args.push("--model", probeModel);
+        if (variant) args.push("--variant", variant);
+      }
       if (extraArgs.length > 0) args.push(...extraArgs);
 
       // Sandbox bridges still add cold-start and transport overhead, but the

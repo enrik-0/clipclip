@@ -79,6 +79,11 @@ vi.mock("./models.js", async () => ({
   discoverOpenCodeModels: vi.fn().mockRejectedValue(new Error("catalog should not be needed")),
   ensureOpenCodeModelConfiguredAndAvailable: vi.fn().mockRejectedValue(new Error("catalog should not be needed")),
 }));
+// Keep the probe arguments independent of the OpenCode CLI installed on the host.
+vi.mock("./cli-version.js", async () => ({
+  ...await vi.importActual<typeof import("./cli-version.js")>("./cli-version.js"),
+  detectOpenCodeCliVersion: vi.fn(async () => null),
+}));
 
 describe("opencode remote environment diagnostics", () => {
   const configHomes: string[] = [];
