@@ -67,6 +67,9 @@ function historicalFailureCount(run: RetryRun): number {
     const saved = count(run.contextSnapshot?.failureRetriesBeforeWorkspaceWait);
     if (saved !== null) return saved;
   }
+  // A provider quota wait resumes at the provider's reset; it spends no failure.
+  const beforeQuotaWait = count(run.contextSnapshot?.failureRetriesBeforeProviderQuotaWait);
+  if (beforeQuotaWait !== null) return beforeQuotaWait;
   // Historical ambiguous counters remain conservative rather than resetting.
   return count(run.scheduledRetryAttempt) ?? 0;
 }

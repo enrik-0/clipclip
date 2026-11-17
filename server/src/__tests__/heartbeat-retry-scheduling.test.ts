@@ -320,6 +320,44 @@ describeEmbeddedPostgres("heartbeat bounded retry scheduling", () => {
       resultJson: { executionRecovery: { kind: "bootstrap", providerWorkStarted: false } } }).where(eq(heartbeatRuns.id, scheduled.run!.id));
     expect(await heartbeat.scheduleBoundedRetry(scheduled.run!.id, { now, random: () => 0 })).toMatchObject({ outcome: "retry_exhausted" });
   });
+  it("waits for a provider quota reset without spending the failure budget", async () => {
+    const runId = randomUUID(), companyId = randomUUID(), agentId = randomUUID();
+    const now = new Date("2026-04-20T12:00:00.000Z");
+    const resetAt = "2026-04-20T17:00:00.000Z";
+    // Two earlier failures already spent the budget; the quota wait still resumes at the reset.
+    // A conversation adapter run, as `claude_local` records it, bound to its task.
+    const conversation = { conversationContinuation: "continue_conversation_v1" };
+    await seedRetryFixture({ runId, companyId, agentId, now, errorCode: "provider_quota", scheduledRetryAttempt: 2,
+      adapterType: "claude_local", resultJson: { ...conversation, errorFamily: "provider_quota", retryNotBefore: resetAt } });
+    const issueId = randomUUID();
+    await db.insert(issues).values({ id: issueId, companyId, title: "Quota fixture", status: "in_progress", assigneeAgentId: agentId });
+    await db.update(heartbeatRuns).set({ contextSnapshot: { issueId, wakeReason: "issue_assigned" } }).where(eq(heartbeatRuns.id, runId));
+    const scheduled = await heartbeat.scheduleBoundedRetry(runId, { now, random: () => 0 });
+    expect(scheduled).toMatchObject({ outcome: "scheduled", run: { scheduledRetryReason: "transient_failure" } });
+    if (scheduled.outcome !== "scheduled" || !scheduled.run) throw new Error("Expected a quota wait");
+    expect(scheduled.run.scheduledRetryAt?.toISOString()).toBe(resetAt);
+    expect(scheduled.run.contextSnapshot).toMatchObject({
+      failureRetriesBeforeProviderQuotaWait: 2, executionRetryAccounting: { failureRetries: 2 },
+    });
+
+    // The resumed run stops on the next window too: it waits again.
+    const nextResetAt = "2026-04-20T22:00:00.000Z";
+    await db.update(heartbeatRuns).set({ status: "failed", errorCode: "provider_quota", finishedAt: new Date(resetAt),
+      resultJson: { ...conversation, errorFamily: "provider_quota", retryNotBefore: nextResetAt },
+    }).where(eq(heartbeatRuns.id, scheduled.run.id));
+    const again = await heartbeat.scheduleBoundedRetry(scheduled.run.id, { now: new Date(resetAt), random: () => 0 });
+    expect(again).toMatchObject({ outcome: "scheduled" });
+    if (again.outcome !== "scheduled" || !again.run) throw new Error("Expected a second quota wait");
+    expect(again.run.scheduledRetryAt?.toISOString()).toBe(nextResetAt);
+
+    // A later failure that is not a quota wait still meets the spent budget.
+    await db.update(heartbeatRuns).set({ status: "failed", errorCode: "overloaded", finishedAt: new Date(nextResetAt),
+      resultJson: { ...conversation, errorFamily: "transient_upstream" },
+    }).where(eq(heartbeatRuns.id, again.run.id));
+    expect(await heartbeat.scheduleBoundedRetry(again.run.id, { now: new Date(nextResetAt), random: () => 0 }))
+      .toMatchObject({ outcome: "retry_exhausted" });
+  });
+
   it("records pre-provider quota rejection, schedules the reset-time retry, and leaves the agent idle", async () => {
     const companyId = randomUUID();
     const agentId = randomUUID();

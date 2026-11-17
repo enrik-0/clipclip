@@ -23,11 +23,11 @@ const URL_RE = /(https?:\/\/[^\s'"`<>()[\]{};,!?]+[^\s'"`<>()[\]{};,!.?:]+)/gi;
 const CLAUDE_TRANSIENT_UPSTREAM_RE =
   /(?:rate[-\s]?limit(?:ed)?|rate_limit_error|too\s+many\s+requests|\b429\b|overloaded(?:_error)?|server\s+overloaded|service\s+unavailable|\b503\b|\b529\b|high\s+demand|try\s+again\s+later|temporarily\s+unavailable|throttl(?:ed|ing)|throttlingexception|servicequotaexceededexception|out\s+of\s+extra\s+usage|extra\s+usage\b|claude\s+usage\s+limit\s+reached|5[-\s]?hour\s+limit\s+reached|weekly\s+limit\s+reached|usage\s+limit\s+reached|usage\s+cap\s+reached)/i;
 const CLAUDE_PROVIDER_QUOTA_RE =
-  /(?:you(?:'|’)ve\s+hit\s+your\s+(?:\w+\s+)?limit|session\s+limit\s+(?:reached|exceeded)|out\s+of\s+extra\s+usage|extra\s+usage\b|claude\s+usage\s+limit\s+reached|5[-\s]?hour\s+limit\s+reached|weekly\s+limit\s+reached|usage\s+limit\s+reached|usage\s+cap\s+reached|servicequotaexceededexception)/i;
+  /(?:you(?:'|’)ve\s+hit\s+your\s+(?:[\w-]+\s+)?limit|session\s+limit\s+(?:reached|exceeded)|out\s+of\s+extra\s+usage|extra\s+usage\b|claude\s+usage\s+limit\s+reached|5[-\s]?hour\s+limit\s+reached|weekly\s+limit\s+reached|usage\s+limit\s+reached|usage\s+cap\s+reached|servicequotaexceededexception)/i;
 const CLAUDE_MODEL_NOT_FOUND_RE =
   /(?:\b404\b[\s\S]{0,120})?(?:model[\s_-]*(?:not[\s_-]*found|does not exist|unknown|invalid)|unknown[\s_-]*model)/i;
 const CLAUDE_EXTRA_USAGE_RESET_RE =
-  /(?:you(?:'|’)ve\s+hit\s+your\s+(?:\w+\s+)?limit|session\s+limit\s+(?:reached|exceeded)|out\s+of\s+extra\s+usage|extra\s+usage|usage\s+limit\s+reached|usage\s+cap\s+reached|5[-\s]?hour\s+limit\s+reached|weekly\s+limit\s+reached|claude\s+usage\s+limit\s+reached)[\s\S]{0,120}?\bresets?\s+(?:at\s+)?([^\n()]+?)(?:\s*\(([^)]+)\))?(?:[.!]|\n|$)/i;
+  /(?:you(?:'|’)ve\s+hit\s+your\s+(?:[\w-]+\s+)?limit|session\s+limit\s+(?:reached|exceeded)|out\s+of\s+extra\s+usage|extra\s+usage|usage\s+limit\s+reached|usage\s+cap\s+reached|5[-\s]?hour\s+limit\s+reached|weekly\s+limit\s+reached|claude\s+usage\s+limit\s+reached)[\s\S]{0,120}?\bresets?\s+(?:at\s+)?([^\n()]+?)(?:\s*\(([^)]+)\))?(?:[.!]|\n|$|\s*\()/i;
 
 /**
  * Sum the per-model usage ledger from a Claude CLI result event. The result
@@ -397,8 +397,46 @@ function buildClaudeTransientHaystack(input: {
     .join("\n")
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter(Boolean)
+    // Every run reports its allowance in a structured event; its field names are not failure wording.
+    .filter((line) => line && !isClaudeRateLimitEventLine(line))
     .join("\n");
+}
+
+function isClaudeRateLimitEventLine(line: string): boolean {
+  return line.startsWith("{") && line.includes('"rate_limit_event"') && line.includes('"rate_limit_info"');
+}
+
+export interface ClaudeRateLimitRejection {
+  /** The window that refused the request, such as `five_hour` or `seven_day`. */
+  rateLimitType: string | null;
+  /** When that window opens again, if the CLI reported it. */
+  resetsAt: Date | null;
+}
+
+/**
+ * The Claude CLI reports the account allowance as `rate_limit_event` lines in
+ * its stream-json output. The latest one says whether the provider refused the
+ * request and when the refusing window resets.
+ */
+export function readClaudeRateLimitRejection(stdout: string | null | undefined): ClaudeRateLimitRejection | null {
+  let latest: Record<string, unknown> | null = null;
+  for (const rawLine of (stdout ?? "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!isClaudeRateLimitEventLine(line)) continue;
+    try {
+      const event = parseObject(JSON.parse(line));
+      if (event.type === "rate_limit_event") latest = parseObject(event.rate_limit_info);
+    } catch {
+      // A truncated line carries no usable allowance.
+    }
+  }
+  if (!latest || latest.status !== "rejected") return null;
+  const resetsAtSeconds = typeof latest.resetsAt === "number" && Number.isFinite(latest.resetsAt) ? latest.resetsAt : null;
+  const rateLimitType = asString(latest.rateLimitType, "").trim();
+  return {
+    rateLimitType: rateLimitType || null,
+    resetsAt: resetsAtSeconds !== null && resetsAtSeconds > 0 ? new Date(resetsAtSeconds * 1000) : null,
+  };
 }
 
 function readTimeZoneParts(date: Date, timeZone: string) {
@@ -543,6 +581,9 @@ export function extractClaudeRetryNotBefore(
   },
   now = new Date(),
 ): Date | null {
+  // The structured event carries the exact reset; the message only a wall clock.
+  const rejection = readClaudeRateLimitRejection(input.stdout);
+  if (rejection?.resetsAt && rejection.resetsAt.getTime() > now.getTime()) return rejection.resetsAt;
   const haystack = buildClaudeTransientHaystack(input);
   const match = haystack.match(CLAUDE_EXTRA_USAGE_RESET_RE);
   if (!match) return null;
@@ -590,6 +631,7 @@ export function isClaudeProviderQuotaError(input: {
   });
   if (loginMeta.requiresLogin) return false;
 
+  if (readClaudeRateLimitRejection(input.stdout)) return true;
   const haystack = buildClaudeTransientHaystack(input);
   if (!haystack) return false;
   return CLAUDE_PROVIDER_QUOTA_RE.test(haystack);
