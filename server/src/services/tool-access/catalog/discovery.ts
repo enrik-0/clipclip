@@ -13,6 +13,9 @@ import { mcpDiscoveryHttpFailure, withMcpConnectionFailure } from "../../mcp-con
 import { BROWSER_USE_TOOLS } from "@paperclipai/shared";
 import { browserUseClient, isBrowserUseConnection } from "../../browser-use-client.js";
 import { COGNEE_STDIO_TEMPLATE, cogneeCloudUrl } from "../../cognee-connection.js";
+import {
+  OBSIDIAN_VAULT_TEMPLATE_ID, ObsidianVaultConfigError, obsidianToolAvailable, readObsidianVaultSettings,
+} from "../../obsidian-connection.js";
 import { isMemoryConnectorId } from "@paperclipai/shared";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
@@ -455,6 +458,15 @@ export function createToolCatalogDiscovery(db: Db, { now, audit, secrets, creden
     }
     await resolveCredentialHeaders(connection);
     await validateCogneeConnection(connection, actor);
+    if (connection.config.templateId === OBSIDIAN_VAULT_TEMPLATE_ID) {
+      // The vault is a folder on the runtime host; a wrong path is the setup mistake to name.
+      try { readObsidianVaultSettings(connection.config); }
+      catch (error) {
+        if (error instanceof ObsidianVaultConfigError) throw badRequest(error.message, { code: error.code });
+        throw error;
+      }
+      return (await localTools(connection)).filter((tool) => obsidianToolAvailable(connection.config, tool.name));
+    }
     return localTools(connection);
   }
   return { remoteTools, validateCogneeConnection, validateAgentMailConnection, discoverTools };

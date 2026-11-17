@@ -33,6 +33,9 @@ import { boundedMcpToolName } from "./mcp-tool-names.js";
 import { browserUseService } from "./browser-use.js";
 import { isBrowserUseConnection } from "./browser-use-client.js";
 import { COGNEE_STDIO_TEMPLATE, cogneeCloudUrl, callCogneeCloud } from "./cognee-connection.js";
+import {
+  OBSIDIAN_STDIO_TEMPLATE, OBSIDIAN_VAULT_APP_SLUG, OBSIDIAN_VAULT_TEMPLATE_ID, ObsidianVaultConfigError, obsidianVaultCommand,
+} from "./obsidian-connection.js";
 import { HttpError } from "../errors.js";
 import { authorizationService, canActorReadIssuePrivacy, type AuthorizationActor } from "./authorization.js";
 import { claimSlackRateLimitRetry } from "./connectors/slack-retry.js";
@@ -561,6 +564,7 @@ const BUILTIN_LOCAL_STDIO_RUNTIME_TEMPLATES: Record<
   Omit<LocalStdioRuntimeTemplate, "templateId">
 > = {
   "paperclip.cognee-cloud": COGNEE_STDIO_TEMPLATE,
+  [OBSIDIAN_VAULT_TEMPLATE_ID]: OBSIDIAN_STDIO_TEMPLATE,
   "paperclip.google-sheets": {
     command: "paperclip-google-sheets-mcp-server",
     args: [],
@@ -5369,7 +5373,17 @@ export function createToolGatewayService(
         },
       });
     }
-    if (!input.template.command) {
+    let command = input.template.command;
+    let args = input.template.args;
+    if (input.template.templateId === OBSIDIAN_VAULT_TEMPLATE_ID) {
+      // Each Obsidian connection serves its own vault folder.
+      try { ({ command, args } = obsidianVaultCommand(input.connection.config)); }
+      catch (error) {
+        if (!(error instanceof ObsidianVaultConfigError)) throw error;
+        throw new ToolGatewayHttpError(422, error.message, error.code, { connectionId: input.connection.id });
+      }
+    }
+    if (!command) {
       throw new ToolGatewayHttpError(
         501,
         "Local stdio template does not define an executable command",
@@ -5380,7 +5394,7 @@ export function createToolGatewayService(
         },
       );
     }
-    const child = spawn(input.template.command, input.template.args, {
+    const child = spawn(command, args, {
       env: input.env,
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -9787,6 +9801,29 @@ export function createToolGatewayService(
         try { await measureRunPhase("connectors.browser_use.grant", () => resolveConnectionGrant(session, connection, false)); resources.push({ id: connection.id, connectionId: connection.id, label: "Browser Use Cloud" }); } catch { /* Unavailable grants do not contribute a runtime skill. */ }
       }
       return resources;
+    },
+
+    /** The Obsidian vault connections whose tools this agent may use in this run. */
+    async obsidianVaultResources(binding: { companyId: string; agentId: string; runId?: string; issueId?: string }) {
+      if (!binding.runId || !binding.issueId) return [];
+      const connections = await db.select({ id: toolConnections.id, name: toolConnections.name, config: toolConnections.config })
+        .from(toolConnections).where(and(
+          eq(toolConnections.companyId, binding.companyId), eq(toolConnections.transport, "local_stdio"),
+          eq(toolConnections.enabled, true), eq(toolConnections.status, "active"),
+          sql`${toolConnections.config}->>'sourceTemplateKey' = ${OBSIDIAN_VAULT_APP_SLUG}`,
+        )).orderBy(toolConnections.name, toolConnections.id);
+      if (!connections.length) return [];
+      const session: ToolGatewaySession = { ...binding, runId: binding.runId, issueId: binding.issueId, id: randomUUID(), token: "", projectId: null, createdAt: new Date(), expiresAt: new Date(Date.now() + 60000) };
+      await assertAgentInCompany(binding.companyId, binding.agentId);
+      if (await githubGuestBotConnectionForSession(db, session)) return [];
+      const candidates = await connectedMcpToolsForCompany(binding.companyId, connections.map(connection => connection.id));
+      const decisions = await decideToolsForListing(candidates, tool => policyInputForTool({ session, tool }));
+      const visible = new Set(decisions.filter(({ decision }) => decision.allowed || decision.decision === "require_approval")
+        .map(({ tool }) => tool.connectionId));
+      return connections.filter(connection => visible.has(connection.id)).map(connection => ({
+        id: connection.id, connectionId: connection.id, label: connection.name,
+        metadata: { readOnly: asRecord(asRecord(connection.config)?.methodConfig)?.readOnly === true },
+      }));
     },
 
     async summarizeConnectionAccessForAgent(input: {
