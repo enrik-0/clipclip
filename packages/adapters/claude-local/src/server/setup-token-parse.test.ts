@@ -155,6 +155,51 @@ describe("parseSetupTokenPrompt", () => {
     expect(result?.prompt).toBe(SETUP_TOKEN_PROMPT);
   });
 
+  describe("Claude Code 2.1.326 screen layout", () => {
+    // The live UI paints every row at an absolute cursor position (CUP, `ESC[row;colH`)
+    // and writes no line feed between rows. The authorization URL is an inline OSC 8
+    // hyperlink glued to "(c to copy)" and the prompt follows on the same stream.
+    // Values are synthetic; the structure is the one captured from the real CLI.
+    const ESC = "\x1b";
+    const url326 =
+      "https://claude.com/cai/oauth/authorize?code=true"
+      + `&client_id=${CLIENT_ID}&response_type=code`
+      + `&redirect_uri=${encodeURIComponent(SETUP_TOKEN_REDIRECT_URI)}&scope=user%3Ainference`
+      + `&code_challenge=${CODE_CHALLENGE}&code_challenge_method=S256&state=${STATE}`;
+    const screen = (display: string) => [
+      "Welcome to Claude Code v2.1.326\r\n",
+      `${ESC}[38;2;255;255;255m·${ESC}[mBrowser didn't open?${ESC}[1CUse the URL${ESC}[1Cbelow${ESC}[1Cto`,
+      `${ESC}[1Csign${ESC}[1Cin${ESC}[38;2;153;153;153m${ESC}[1C(c to copy)`,
+      `${ESC}]8;id=u-qjygl5%12449145447245439509;${url326}${ESC}\\${display}${ESC}]8;;${ESC}\\`,
+      `${ESC}[25;2HPaste${ESC}[1Ccode${ESC}[1Chere${ESC}[1Cif${ESC}[1Cprompted`,
+      `${ESC}[26;2H╭${"─".repeat(40)}╮${ESC}[27;2H│${ESC}[7m${ESC}[1C ${ESC}[27m${ESC}[40C│${ESC}[28;2H╰${"─".repeat(40)}╯`,
+    ].join("");
+
+    it("reads the inline hyperlink URL and the cursor-positioned prompt", () => {
+      const wrappedDisplay = `${ESC}[22;1H${url326.slice(0, 130)}\r\n${url326.slice(130)}${ESC}[m`;
+      const result = parseSetupTokenPrompt(screen(wrappedDisplay));
+      expect(result).not.toBeNull();
+      expect(result?.url).toBe(url326);
+      expect(result?.prompt).toBe(SETUP_TOKEN_PROMPT);
+    });
+
+    it("still reads it when the output arrives in small chunks", () => {
+      const text = screen(`${ESC}[22;1H${url326}${ESC}[m`);
+      let buffer = "";
+      let found: ReturnType<typeof parseSetupTokenPrompt> = null;
+      for (let i = 0; i < text.length && !found; i += 37) {
+        buffer += text.slice(i, i + 37);
+        found = parseSetupTokenPrompt(buffer);
+      }
+      expect(found?.url).toBe(url326);
+    });
+
+    it("does not bind a URL that is not preceded by the sign-in preamble", () => {
+      const text = screen(`${ESC}[22;1H${url326}${ESC}[m`).replace("Use the URL", "Open this link");
+      expect(parseSetupTokenPrompt(text)).toBeNull();
+    });
+  });
+
   it("returns null for a wrong host", () => {
     const badHost = CLAUDE_COM_URL.replace("https://claude.com", "https://claude.example.com");
     expect(parseSetupTokenPrompt(completeOutput(badHost))).toBeNull();

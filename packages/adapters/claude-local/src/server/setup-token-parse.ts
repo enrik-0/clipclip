@@ -164,6 +164,25 @@ const OSC8_HYPERLINK_RE =
 // eslint-disable-next-line no-control-regex
 const OSC_ANY_RE = /\x1b\][^\x1b\x07]*(?:\x1b\\|\x07)/g;
 
+// A Cursor Position sequence (final byte `H` or `f`). Claude Code 2.1.326 paints
+// each screen row at an absolute row and column with this sequence and writes no
+// line feed between rows, so every row boundary is one of these. The prompt
+// parser turns each one into a line break; without it the URL, the sign-in
+// preamble and the browser-code prompt run together on a single line.
+// eslint-disable-next-line no-control-regex
+const CSI_CURSOR_POSITION_RE = /\x1b\[[0-9;]*[Hf]/g;
+
+/**
+ * Restores the row structure of a screen-painted login output. Puts each OSC 8
+ * hyperlink URI on its own line (the CLI glues it right after "(c to copy)"),
+ * and turns each cursor-position sequence into a line break. It only adds line
+ * breaks. The URL and the prompt still pass the same strict validation, and the
+ * success-token parser does not use this step.
+ */
+function separatePaintedRows(text: string): string {
+  return text.replace(OSC8_HYPERLINK_RE, "\n$1\n").replace(CSI_CURSOR_POSITION_RE, "\n");
+}
+
 // Trailing punctuation that prose commonly puts right after a URL. The parser
 // strips only these characters when it compares a line to a repeated URL. It
 // never strips these from the candidate before validation, because the validator
@@ -403,7 +422,7 @@ function findBrowserCodePrompt(lines: string[], endLine: number, url: string): s
  */
 export function parseSetupTokenPrompt(text: string): SetupTokenPrompt | null {
   if (typeof text !== "string" || text.length === 0) return null;
-  const clean = stripTerminalControls(text);
+  const clean = stripTerminalControls(separatePaintedRows(text));
   const preamble = URL_PREAMBLE_RE.exec(clean);
   if (!preamble) return null;
   const afterPreamble = preamble.index + preamble[0].length;
