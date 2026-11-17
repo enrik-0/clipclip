@@ -160,6 +160,28 @@ function readRegistryLockOwner(lockPath: string): RegistryLockOwner | null {
   return null;
 }
 
+const TRANSIENT_RENAME_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+const RENAME_MAX_ATTEMPTS = 20;
+
+/**
+ * Atomically replaces `to` with `from`. On Windows a rename over a file that
+ * another handle is reading (for example the lock heartbeat thread reading
+ * owner.json) fails with EPERM/EACCES/EBUSY until that handle is released, so
+ * retry those briefly. Any other failure is raised immediately.
+ */
+function renameReplacing(from: string, to: string): void {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      fs.renameSync(from, to);
+      return;
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? String(error.code) : "";
+      if (attempt >= RENAME_MAX_ATTEMPTS || !TRANSIENT_RENAME_CODES.has(code)) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(10 * attempt, 50));
+    }
+  }
+}
+
 function writeRegistryLockOwner(lockPath: string, owner: RegistryLockOwner): void {
   const contents = `${JSON.stringify(owner)}\n`;
   for (const ownerFile of [
@@ -169,7 +191,7 @@ function writeRegistryLockOwner(lockPath: string, owner: RegistryLockOwner): voi
     const ownerPath = path.join(lockPath, ownerFile);
     const temporaryPath = `${ownerPath}.${owner.token}.tmp`;
     fs.writeFileSync(temporaryPath, contents, { mode: 0o600 });
-    fs.renameSync(temporaryPath, ownerPath);
+    renameReplacing(temporaryPath, ownerPath);
   }
 }
 
@@ -407,5 +429,5 @@ export function writeWorktreePortRegistry(homeDir: string, configPaths: Iterable
   };
   const temporaryPath = `${registryPath}.${process.pid}.tmp`;
   fs.writeFileSync(temporaryPath, `${JSON.stringify(registry, null, 2)}\n`, { mode: 0o600 });
-  fs.renameSync(temporaryPath, registryPath);
+  renameReplacing(temporaryPath, registryPath);
 }
