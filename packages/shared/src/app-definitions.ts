@@ -288,8 +288,65 @@ export function recommendedDefaultsForApp(app: AppDefinition, methodKey?: string
       askFirstRiskLevels: ["write", "destructive"],
     };
   }
+  // Obsidian patch_note replaces text inside a note. An empty replacement
+  // removes a section, and the vault server keeps no copy of the old text
+  // (a delete moves the note to .trash; an edit does not). Suggest Ask first
+  // for it, and show the reason in the permissions step.
+  if (app.slug === "obsidian") {
+    return {
+      access: "all_agents",
+      askFirstRiskLevels: [],
+      askFirstActions: [{
+        toolName: "patch_note",
+        reason: "Patch note can remove text from a note, and the vault keeps no copy of the old text. A person approves each edit first.",
+      }],
+    };
+  }
   return {
     access: "all_agents",
     askFirstRiskLevels: [],
   };
+}
+
+/** One action that a connection's suggested defaults put behind Ask first. */
+export interface SuggestedAskFirstAction {
+  toolName: string;
+  reason: string;
+}
+
+function suggestedAskFirstActionList(defaults: Record<string, unknown> | null | undefined): SuggestedAskFirstAction[] {
+  const raw = defaults?.askFirstActions;
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const { toolName, reason } = item as Record<string, unknown>;
+    return typeof toolName === "string" && toolName.trim()
+      ? [{ toolName, reason: typeof reason === "string" ? reason : "" }]
+      : [];
+  });
+}
+
+/**
+ * Whether suggested defaults put an action behind Ask first, by risk level
+ * (`askFirstRiskLevels`) or by name (`askFirstActions`). Malformed fields
+ * suggest nothing.
+ */
+export function isSuggestedAskFirstAction(
+  defaults: Record<string, unknown> | null | undefined,
+  action: { toolName: string; riskLevel: string },
+): boolean {
+  const riskLevels = Array.isArray(defaults?.askFirstRiskLevels) ? defaults.askFirstRiskLevels : [];
+  if (riskLevels.some((riskLevel) => riskLevel === action.riskLevel)) return true;
+  return suggestedAskFirstActionList(defaults).some((entry) => entry.toolName === action.toolName);
+}
+
+/** The reason for each action suggested for Ask first by name, keyed by tool name. */
+export function suggestedAskFirstReasons(
+  defaults: Record<string, unknown> | null | undefined,
+): Map<string, string> {
+  return new Map(
+    suggestedAskFirstActionList(defaults)
+      .filter((entry) => entry.reason.trim())
+      .map((entry) => [entry.toolName, entry.reason]),
+  );
 }

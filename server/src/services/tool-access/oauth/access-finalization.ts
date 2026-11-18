@@ -8,7 +8,7 @@ import { and, eq, inArray, or } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { connectionGrantMembers, connectionGrantDelegations, connectionGrants, companySecrets, toolApplications, toolCatalogEntries, toolConnectionInstalls, toolConnections } from "@paperclipai/db";
 import type { FinishToolApp, FinishToolAppResult, FinalizeOAuthAccess, ToolCredentialSecretRef } from "@paperclipai/shared";
-import { getConnectableAppDefinition, recommendedDefaultsForApp } from "@paperclipai/shared";
+import { getConnectableAppDefinition, isSuggestedAskFirstAction, recommendedDefaultsForApp } from "@paperclipai/shared";
 import { badRequest, conflict, forbidden, unprocessable } from "../../../errors.js";
 import { secretService } from "../../secrets.js";
 
@@ -404,20 +404,13 @@ async function finalizeOAuthAccess(
           connectionMethodForConnection(galleryEntry, connection).key,
         )
       : { askFirstRiskLevels: [] };
-    const askFirstRiskLevels = new Set(
-      Array.isArray(defaults.askFirstRiskLevels)
-        ? defaults.askFirstRiskLevels.filter(
-            (value): value is string => typeof value === "string",
-          )
-        : [],
-    );
     const finished = await finishGalleryAppConnection(
       companyId,
       connection.id,
       {
         enabledCatalogEntryIds: catalog.map((entry) => entry.id),
         askFirstCatalogEntryIds: catalog
-          .filter((entry) => askFirstRiskLevels.has(entry.riskLevel))
+          .filter((entry) => isSuggestedAskFirstAction(defaults, entry))
           .map((entry) => entry.id),
         access: setupAccess ?? (requestingAgentId
           ? { agentIds: [requestingAgentId] }

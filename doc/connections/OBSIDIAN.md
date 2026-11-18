@@ -29,6 +29,7 @@ This works only when Paperclip runs on the computer that holds the vault.
 4. Connect. Paperclip checks that the folder exists.
 5. Choose which tools are allowed, which need approval, and which agents can use
    the connection. Until this step is done, no agent has any of the tools.
+   `patch_note` starts as **Ask first** (see "Suggested permissions").
 
 Repeat the steps for each vault. One company can connect several vaults, each
 with its own name, folder and permissions. A common setup is a read-only
@@ -69,6 +70,26 @@ Delete: `delete_note`. It deletes permanently by default. Require approval for
 it, or leave it out of every agent's tools.
 
 A read-only connection offers only the read tools.
+
+### Suggested permissions
+
+`patch_note` replaces text inside a note. An empty replacement removes a
+section, and the vault server keeps no copy of the old text: `delete_note`
+moves a note to `.trash/`, but an edit does not. So when a vault is connected,
+Paperclip sets `patch_note` to **Ask first**, and the permissions step shows the
+reason next to the action. The other write tools start as **Allowed**. You can
+change any of them in the permissions step.
+
+Decision, 2026-11-18 (issue #11): suggest Ask first for `patch_note` by default.
+Paperclip does not classify single edits by how much text they remove.
+
+Keep the vault under version control (for example Git) or in a synced backup
+with history. Ask first stops an unwanted edit before it runs; only a history of
+the vault can undo an edit that was approved, or one made by a tool that is
+allowed.
+
+The suggestion is in `recommendedDefaultsForApp` in
+`packages/shared/src/app-definitions.ts` (`askFirstActions`).
 
 ### How it works
 

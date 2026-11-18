@@ -1,4 +1,5 @@
 import { AppNotFound, AppReadError } from "./app-detail/AppReadError";
+import { askFirstReasonsForConnection } from "@/features/connections/connection-defaults";
 import { AiConnectionPoolConnector } from "@/components/ai-connections/AiConnectionPoolConnector";
 import { aiConnectionRouterPluginKey } from "@paperclipai/shared";
 import { ConnectionInstructionsSettings } from "@/features/connections/ConnectionInstructions";
@@ -721,6 +722,7 @@ function StandardAppDetail({ renderActions, renderAgentSettings, renderConnectio
                 quarantined={quarantined}
                 enabledIds={enabledIds}
                 askFirstIds={askFirstIds}
+                askFirstReasons={askFirstReasonsForConnection(connection.config)}
                 pending={pending}
                 refreshPending={refreshTools.isPending}
                 permissionChangeWarning={
