@@ -5,7 +5,7 @@ import { app, BrowserWindow, Menu, Tray, nativeImage, shell } from "electron";
 import { resolveDesktopConfig } from "./config.mjs";
 import { handleLaunch, secondInstanceAction } from "./launch.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
-import { statusPageUrl } from "./status-page.mjs";
+import { formatExitCode, statusPageUrl } from "./status-page.mjs";
 
 const srcDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.join(srcDir, "..");
@@ -215,7 +215,7 @@ async function startServer() {
       refreshTray();
       showStatus({
         title: "El servidor de Paperclip se ha detenido",
-        detail: `Salió de forma inesperada (código ${code ?? "ninguno"}, señal ${signal ?? "ninguna"}). Usa "Reiniciar servidor" en el icono de la bandeja.`,
+        detail: `Salió de forma inesperada (código ${formatExitCode(code)}, señal ${signal ?? "ninguna"}). Usa "Reiniciar servidor" en el icono de la bandeja.`,
         log: logTail,
       });
       showWindow();
