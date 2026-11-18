@@ -219,6 +219,7 @@ import {
   verifyToolArgumentsSignature,
 } from "./tool-content-guards.js";
 import { extendApprovedExecutionWaitDeadline } from "./approved-execution-wait.js";
+import { checkToolArgumentsAgainstSchema } from "./tool-argument-schema.js";
 
 const DEFAULT_SESSION_TTL_MS = 15 * 60 * 1000;
 const MAX_SESSION_TTL_MS = 60 * 60 * 1000;
@@ -2556,6 +2557,58 @@ export function createToolGatewayService(
         instructions: await approvalRequiredInstructions(input.issueId),
       },
     );
+  }
+
+  // A call that needs human approval must be one that can succeed. Check the
+  // agent's arguments against the schema the agent was shown before an action
+  // request, card or formal approval exists. See tool-argument-schema.ts for
+  // the rules, including the pass-through for tools without a schema.
+  async function rejectApprovalCallWithInvalidArguments(input: {
+    session: ToolGatewaySession;
+    tool: ToolGatewayDescriptor;
+    parameters: unknown;
+    argumentsSummary: ReturnType<typeof summarizeToolValue>;
+  }): Promise<void> {
+    const check = checkToolArgumentsAgainstSchema(
+      input.tool.name,
+      input.tool.parametersSchema,
+      input.parameters,
+    );
+    if (check.ok) return;
+    const details = {
+      tool: input.tool.name,
+      missingProperties: check.missingProperties,
+      unknownProperties: check.unknownProperties,
+      invalidValues: check.invalidValues,
+      expectedProperties: check.expectedProperties,
+    };
+    await writeToolCallEvent({
+      session: input.session,
+      eventType: "call_denied",
+      outcome: "denied",
+      toolName: input.tool.name,
+      policyDecision: "require_approval",
+      reasonCode: "invalid_tool_arguments",
+      argumentsSummary: input.argumentsSummary,
+      metadata: details,
+      tool: input.tool,
+    });
+    await writeAudit({
+      session: input.session,
+      companyId: input.session.companyId,
+      agentId: input.session.agentId,
+      runId: input.session.runId,
+      issueId: input.session.issueId,
+      action: "tool_gateway.call_denied",
+      details: {
+        ...details,
+        decision: "require_approval",
+        reasonCode: "invalid_tool_arguments",
+        ...toolAuditMetadata(input.tool),
+        argumentsSummary: input.argumentsSummary,
+      },
+    });
+    throw new ToolGatewayHttpError(422, check.message, "invalid_tool_arguments", details);
   }
 
   async function requestApprovalForRecordedToolCall(input: {
@@ -10817,6 +10870,7 @@ export function createToolGatewayService(
       // approval signing, previews, and audit summaries. Approved retries
       // re-project only for a compatibility comparison and dispatch the
       // already-reviewed signed payload unchanged.
+      const agentParameters = requestedParameters;
       if (!input.approvedActionRequestId) {
         requestedParameters = await governedToolArguments(
           session,
@@ -11272,6 +11326,13 @@ export function createToolGatewayService(
         if (accessDecision.allowed && tool.providerType === "paperclip_slack_chat" && SLACK_TOOLS.some(t => t.name === tool.upstreamToolName && t.risk === "approval")) {
           accessDecision = { ...accessDecision, allowed: false, decision: "require_approval", reasonCode: "requires_approval_policy", explanation: "Slack destructive actions, channel creation and invitations require approval." };
         }
+        if (accessDecision.decision === "require_approval")
+          await rejectApprovalCallWithInvalidArguments({
+            session,
+            tool,
+            parameters: agentParameters,
+            argumentsSummary: argumentValidation.summary,
+          });
         const recorded = await recordToolInvocation(
           decisionInput,
           accessDecision,
@@ -11801,6 +11862,13 @@ export function createToolGatewayService(
         consumeRateLimit: true,
       });
       const accessDecision = await policyService.decide(decisionInput);
+      if (accessDecision.decision === "require_approval")
+        await rejectApprovalCallWithInvalidArguments({
+          session: sessionLike,
+          tool,
+          parameters: requestedParameters,
+          argumentsSummary: argumentValidation.summary,
+        });
       const recorded = await recordToolInvocation(
         decisionInput,
         accessDecision,

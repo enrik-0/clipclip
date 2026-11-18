@@ -24,6 +24,34 @@ recorded result in a new turn and writes the user-facing answer. Live activity
 invalidation refreshes both surfaces, with existing polling/reconnect reconciliation
 retained.
 
+## Argument check before review
+
+Before the gateway creates a review, it checks the call arguments against the
+input schema that the agent was shown for the tool. If they do not match, the
+agent gets a tool error (`invalid_tool_arguments`, HTTP 422; through MCP
+`tools/call` it is a result with `isError: true`). The error names the missing
+required properties, the unknown properties, the invalid values, and all the
+expected property names. No action request, card or formal approval is created,
+so no person reviews a call that cannot succeed. The audit log records a
+`call_denied` event with the same details.
+
+Rules:
+
+- The check validates only. It does not fill defaults, rename properties or
+  convert types.
+- A top-level property that is not in the schema `properties` is an error,
+  unless the schema allows extra properties (`additionalProperties` other than
+  `false`, `patternProperties`, or a composed schema such as `allOf`).
+- A tool without an input schema, with an empty schema, or with an object
+  schema that lists no `properties`, is not checked. The call goes on to review
+  unchanged, because the gateway cannot tell a mistake from a valid call.
+- A schema that the validator cannot compile is not checked either. A provider
+  schema that the validator cannot read must not block every call.
+- Calls that do not need approval are not checked. The provider still validates
+  them.
+
+The check is in `server/src/services/tool-argument-schema.ts`.
+
 ## Remembered permission
 
 Choose **Always allow** from the split button beside **Approve & run**. It
