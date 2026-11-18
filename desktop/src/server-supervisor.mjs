@@ -22,6 +22,20 @@ export async function probeServer(baseUrl, { fetchImpl = fetch, timeoutMs = 1500
   }
 }
 
+/**
+ * True when `GET /` at `baseUrl` serves the board UI: a successful HTML
+ * answer. A server in API-only mode answers 404 there ("Cannot GET /").
+ */
+export async function probeUi(baseUrl, { fetchImpl = fetch, timeoutMs = 5000 } = {}) {
+  try {
+    const response = await fetchImpl(`${baseUrl}/`, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!response.ok) return false;
+    return /^text\/html\b/i.test(response.headers.get("content-type") ?? "");
+  } catch {
+    return false;
+  }
+}
+
 function killProcessTree(child) {
   if (process.platform === "win32" && child.pid) {
     // The server owns grandchildren (embedded PostgreSQL, agent CLIs) that a
@@ -34,8 +48,9 @@ function killProcessTree(child) {
 
 /**
  * Starts the Paperclip server in a child Node process, or attaches to one that
- * is already running at the expected URL. Only a server this supervisor
- * started is stopped by `stop()`.
+ * is already running at the expected URL. `start()` resolves to
+ * `{ url, owned, ui }`, where `ui` is false for an attached server that serves
+ * no board UI. Only a server this supervisor started is stopped by `stop()`.
  */
 export function createServerSupervisor({
   config,
@@ -54,7 +69,7 @@ export function createServerSupervisor({
 
   async function start() {
     if (await probeServer(config.expectedUrl, { fetchImpl })) {
-      return { url: config.expectedUrl, owned: false };
+      return { url: config.expectedUrl, owned: false, ui: await probeUi(config.expectedUrl, { fetchImpl }) };
     }
     if (!config.serverMode) {
       throw new Error(
@@ -88,7 +103,9 @@ export function createServerSupervisor({
       child.on("message", (message) => {
         if (message?.type === "ready") {
           clearTimeout(timer);
-          resolve({ url: localUrlFor(message.host, message.listenPort), owned: true });
+          // An owned server always serves the UI: the config turns on the
+          // Vite middleware when no built UI exists.
+          resolve({ url: localUrlFor(message.host, message.listenPort), owned: true, ui: true });
         } else if (message?.type === "error") {
           clearTimeout(timer);
           reject(new Error(message.message));
