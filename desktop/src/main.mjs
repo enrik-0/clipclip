@@ -22,6 +22,8 @@ let tray = null;
 let supervisor = null;
 let serverUrl = null;
 let serverOwned = false;
+// False when the app attached to a server that serves no board UI (API-only).
+let serverUi = false;
 let logStream = null;
 let logTail = "";
 let quitting = false;
@@ -66,6 +68,27 @@ function openExternally(url) {
 
 function showStatus(page) {
   if (mainWindow && !mainWindow.isDestroyed()) void mainWindow.loadURL(statusPageUrl(page));
+}
+
+function noUiPage() {
+  return {
+    title: "El servidor encontrado no muestra la interfaz",
+    detail:
+      `Hay un servidor de Paperclip en ${serverUrl}, pero funciona solo como API: no tiene la interfaz compilada ` +
+      "ni el middleware de Vite. La app se ha conectado a él y no lo detendrá al salir. " +
+      'Opciones: detén ese servidor y usa "Reiniciar servidor" en el icono de la bandeja para que la app arranque el ' +
+      'suyo; arráncalo de nuevo con la interfaz (por ejemplo, con "pnpm dev"); o usa "Abrir la API en el navegador".',
+  };
+}
+
+/** Loads the server UI, or explains why there is none to load. */
+function loadServer() {
+  if (!mainWindow || mainWindow.isDestroyed() || !serverUrl) return Promise.resolve();
+  if (!serverUi) {
+    showStatus(noUiPage());
+    return Promise.resolve();
+  }
+  return mainWindow.loadURL(serverUrl);
 }
 
 function showWindow() {
@@ -117,7 +140,7 @@ function createWindow() {
     mainWindow = null;
   });
 
-  if (serverUrl) void mainWindow.loadURL(serverUrl);
+  void loadServer();
 }
 
 function buildTrayMenu() {
@@ -125,14 +148,16 @@ function buildTrayMenu() {
   return Menu.buildFromTemplate([
     { label: "Abrir Paperclip", click: showWindow },
     {
-      label: "Abrir en el navegador",
+      label: serverUi || serverUrl === null ? "Abrir en el navegador" : "Abrir la API en el navegador",
       enabled: serverUrl !== null,
-      click: () => serverUrl && openExternally(serverUrl),
+      click: () => serverUrl && openExternally(serverUi ? serverUrl : `${serverUrl}/api/health`),
     },
     { type: "separator" },
     {
       label: "Reiniciar servidor",
-      enabled: serverOwned || serverUrl === null,
+      // Without a UI, restarting probes again: if that server was stopped, the
+      // app starts its own.
+      enabled: serverOwned || serverUrl === null || !serverUi,
       click: () => void restartServer(),
     },
     {
@@ -153,7 +178,9 @@ function refreshTray() {
   if (!tray) return;
   tray.setContextMenu(buildTrayMenu());
   tray.setToolTip(
-    serverUrl ? `Paperclip — ${serverUrl}${serverOwned ? "" : " (servidor externo)"}` : "Paperclip — sin servidor",
+    serverUrl
+      ? `Paperclip — ${serverUrl}${serverOwned ? "" : " (servidor externo)"}${serverUi ? "" : " (sin interfaz)"}`
+      : "Paperclip — sin servidor",
   );
 }
 
@@ -169,6 +196,7 @@ function createTray() {
 async function startServer() {
   serverUrl = null;
   serverOwned = false;
+  serverUi = false;
   refreshTray();
   showStatus({
     title: "Iniciando Paperclip…",
@@ -183,6 +211,7 @@ async function startServer() {
     onUnexpectedExit: ({ code, signal }) => {
       serverUrl = null;
       serverOwned = false;
+      serverUi = false;
       refreshTray();
       showStatus({
         title: "El servidor de Paperclip se ha detenido",
@@ -197,9 +226,12 @@ async function startServer() {
     const result = await supervisor.start();
     serverUrl = result.url;
     serverOwned = result.owned;
-    appendLog(`[desktop] ${result.owned ? "started" : "attached to"} server at ${result.url}\n`);
+    serverUi = result.ui;
+    appendLog(
+      `[desktop] ${result.owned ? "started" : "attached to"} server at ${result.url}${result.ui ? "" : " (no UI at /)"}\n`,
+    );
     refreshTray();
-    if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(serverUrl);
+    await loadServer();
   } catch (error) {
     appendLog(`[desktop] server start failed: ${error?.message ?? error}\n`);
     refreshTray();

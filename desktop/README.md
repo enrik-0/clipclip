@@ -20,7 +20,9 @@ Requisitos: Node en el `PATH` y las dependencias del repositorio instaladas (`pn
 ## Comportamiento
 
 - **Servidor propio o externo.** Si ya hay un Paperclip respondiendo en la URL esperada, la app se conecta a él y no lo
-  detiene al salir. Si no, lo arranca ella y lo apaga de forma ordenada al salir.
+  detiene al salir. Si no, lo arranca ella y lo apaga de forma ordenada al salir. Si el servidor encontrado no sirve la
+  interfaz (modo solo API, como `pnpm dev:server` sin UI compilada), la ventana lo explica en vez de cargar su página
+  de error.
 - **Cerrar la ventana no cierra la app.** Se oculta en la bandeja y los agentes siguen trabajando. Para terminar, usa
   "Salir" en el icono de la bandeja o ejecuta `pnpm start -- --quit`. Un proceso lanzado con `--quit` nunca arranca la
   app: si no hay ninguna instancia en marcha, termina enseguida con el código 2.

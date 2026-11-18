@@ -15,7 +15,13 @@ if (mode === "error") {
       res.end(JSON.stringify({ status: "ok" }));
       return;
     }
-    res.writeHead(404).end();
+    // "api-only" mimics a server with no built UI and no Vite middleware.
+    if (req.url === "/" && mode !== "api-only") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end("<!doctype html><title>Paperclip</title>");
+      return;
+    }
+    res.writeHead(404, { "content-type": "text/html; charset=utf-8" }).end("<pre>Cannot GET /</pre>");
   });
   server.listen(0, "127.0.0.1", () => {
     process.send({ type: "ready", host: "127.0.0.1", listenPort: server.address().port, apiUrl: "ignored" });
