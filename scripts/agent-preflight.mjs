@@ -53,9 +53,25 @@ function log(message) {
   console.log(`[agent:preflight] ${message}`);
 }
 
+// On Windows these package managers are `.cmd` shims, and Node cannot spawn a
+// `.cmd` file without a shell. Through the shell, each argument is quoted for cmd.
+const WINDOWS_CMD_SHIMS = new Set(["pnpm", "npm", "npx"]);
+
+function quoteForCmd(argument) {
+  return /[\s"&|<>^()%!]/.test(argument) ? `"${argument.replace(/"/g, '""')}"` : argument;
+}
+
+export function commandInvocation(command, args, platform = process.platform) {
+  if (platform === "win32" && WINDOWS_CMD_SHIMS.has(command)) {
+    return { command, args: args.map(quoteForCmd), shell: true };
+  }
+  return { command, args, shell: false };
+}
+
 function exec(command, args, cwd, env = process.env) {
   const started = Date.now();
-  const result = spawnSync(command, args, { cwd, env, stdio: "inherit" });
+  const invocation = commandInvocation(command, args);
+  const result = spawnSync(invocation.command, invocation.args, { cwd, env, stdio: "inherit", shell: invocation.shell });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`${command} ${args.join(" ")} failed with exit ${result.status ?? result.signal}`);
   return (Date.now() - started) / 1000;
@@ -82,7 +98,8 @@ export function installKey(root, toolchain) {
     ":(glob)**/package.json", "patches"], { cwd: root, encoding: "utf8" });
   if (tracked.status !== 0) return null;
   const files = tracked.stdout.split("\0").filter(Boolean);
-  const pnpm = spawnSync("pnpm", ["--version"], { cwd: root, encoding: "utf8" }).stdout?.trim();
+  const version = commandInvocation("pnpm", ["--version"]);
+  const pnpm = spawnSync(version.command, version.args, { cwd: root, encoding: "utf8", shell: version.shell }).stdout?.trim();
   return hashFiles(root, files).update(JSON.stringify({ node: toolchain.node, platform: toolchain.platform,
     arch: toolchain.arch, pnpm })).digest("hex");
 }
@@ -262,7 +279,13 @@ function binaryState(file) {
   } catch { return null; }
 }
 
-function debugBinsStep(root, cache, toolchain, bins) {
+// Cargo names a binary target's executable after the target, with `.exe` on Windows.
+export function binaryFileName(bin, platform = process.platform) {
+  return platform === "win32" ? `${bin}.exe` : bin;
+}
+
+function debugBinsStep(root, cache, toolchain, targets) {
+  const bins = targets.map(target => binaryFileName(target));
   const debug = path.join(targetDirectory(root), "debug");
   const stampFile = path.join(debug, ".paperclip-agent-debug-bins.json");
   const key = debugBinsKey(root, toolchain);
