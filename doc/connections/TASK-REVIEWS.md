@@ -63,6 +63,17 @@ to the task. One decision is enough, from either place:
   on the request and on the card (Succeeded or Execution failed).
 - **Reject** in the Inbox, or **Decline** on the card, resolves both records.
   The action does not run.
+- **Request changes** (the request-revision decision) in the Inbox is a
+  decline with the note as the reason. The agent cannot revise a tool call in
+  place, so the action request is declined and never runs, and the formal
+  approval becomes `rejected` with the note as its decision note. Both records
+  are resolved in the same review transaction as **Reject**, and the
+  `approval.rejected` activity entry is written. The agent gets the note as the
+  decline reason in its wake, so it can try another way. Without a note, the
+  reason is a short default text that tells the agent the board requested
+  changes (`TOOL_ACTION_REVISION_DEFAULT_REASON`). Other approvals keep the
+  usual request-revision flow: the status becomes `revision_requested` and the
+  requester can resubmit.
 - The agent is woken only after the outcome is recorded, through the
   continuation described below. The wake carries the result, the failure or
   the decline. The approvals route does not send its own requester wake for
@@ -81,7 +92,8 @@ to a handler that the tool gateway registers
 (`server/src/services/approval-decision-handlers.ts`,
 `server/src/services/tool-action-formal-approval.ts`). The review transaction
 in `server/src/services/tool-action-review.ts` resolves the formal approval and
-writes the `approval.approved` or `approval.rejected` activity entry.
+writes the `approval.approved` or `approval.rejected` activity entry. The
+handler, not the route, decides that a revision request declines the action.
 
 ## Remembered permission
 

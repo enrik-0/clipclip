@@ -2,6 +2,8 @@ import type { approvals } from "@paperclipai/db";
 
 type ApprovalRecord = typeof approvals.$inferSelect;
 
+export type ApprovalDecision = "approved" | "rejected" | "revision_requested";
+
 /**
  * Lets the module that created a board approval own what a decision on it
  * does. The approvals routes keep access checks; the owner applies the
@@ -9,15 +11,20 @@ type ApprovalRecord = typeof approvals.$inferSelect;
  * requester.
  *
  * Without a matching handler, the approvals routes resolve the approval and
- * wake the requester as before.
+ * wake the requester as before, and a revision request only changes the
+ * approval status.
  */
 export interface ApprovalDecisionHandler {
   /** True when this handler owns decisions for the approval. */
   handles(approval: Pick<ApprovalRecord, "type" | "payload">): boolean;
-  /** Applies one board decision. Must be safe to call again with the same decision. */
+  /**
+   * Applies one board decision. Must be safe to call again with the same
+   * decision. The owner decides what "revision_requested" means for its
+   * approvals.
+   */
   decide(input: {
     approval: ApprovalRecord;
-    decision: "approved" | "rejected";
+    decision: ApprovalDecision;
     decidedByUserId: string;
     decisionNote?: string | null;
   }): Promise<void>;
