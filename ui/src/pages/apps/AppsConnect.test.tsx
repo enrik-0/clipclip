@@ -479,6 +479,54 @@ describe("AppsConnect — Connect with a link (M4 frame)", () => {
       expect(container.querySelector('[role="alert"]')?.textContent)
         .toContain("Paperclip is temporarily unavailable. Please try again in a moment.");
     });
+
+    it("names the vault folder in the new connection and on the completion screen", async () => {
+      // The first vault created the application, so the application keeps its name.
+      listConnectionsMock.mockResolvedValue({
+        connections: [{ id: "conn-first", applicationId: "app-obsidian", name: "Vault pruebas", status: "active", config: {}, transportConfig: {} }],
+      });
+      connectAppMock.mockResolvedValueOnce({
+        connectionId: "conn-second",
+        application: { id: "app-obsidian", name: "Vault pruebas" },
+        connection: { id: "conn-second", applicationId: "app-obsidian", name: "Obsidian (Second vault) for the organization", status: "active", config: {}, transportConfig: {} },
+        catalog: [{ id: "tool-read", name: "read_note", status: "active" }],
+        actions: { readOnly: [{ catalogEntryId: "tool-read", riskLevel: "read" }], canMakeChanges: [] },
+        suggestedDefaults: {},
+      });
+      await renderObsidian();
+      await connectVault("C:\\Vaults\\Second vault\\");
+
+      expect(connectAppMock).toHaveBeenCalledWith("company-1", expect.objectContaining({
+        galleryKey: "obsidian",
+        name: "Obsidian (Second vault) for the organization",
+        configValues: expect.objectContaining({ vaultPath: "C:\\Vaults\\Second vault\\" }),
+      }));
+      await vi.waitFor(() => expect(container.textContent).toContain("Obsidian (Second vault) for the organization is ready."));
+      expect(container.textContent).not.toContain("Vault pruebas is ready.");
+    });
+
+    it("shows the read-only choice on the form and keeps the switch one click away", async () => {
+      await renderObsidian();
+
+      const summary = () => container.querySelector('[data-testid="connection-access-mode"]')?.textContent ?? "";
+      expect(summary()).toContain("Read and write");
+      expect(summary()).toContain("Read only");
+      const change = buttonByText("Change");
+      expect(change?.getAttribute("aria-expanded")).toBe("false");
+
+      await act(async () => change!.click());
+      await flushReact();
+      const readOnly = container.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Read only"]');
+      expect(readOnly?.getAttribute("aria-checked")).toBe("false");
+      await act(async () => readOnly!.click());
+      await flushReact();
+
+      expect(summary()).toMatch(/^Read only/);
+      await connectVault("C:\\Vaults\\Procedures");
+      expect(connectAppMock).toHaveBeenCalledWith("company-1", expect.objectContaining({
+        configValues: expect.objectContaining({ readOnly: true }),
+      }));
+    });
   });
 
   it("connects 1Password using only its service-account token and links official creation instructions", async () => {
