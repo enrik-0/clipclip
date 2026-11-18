@@ -14,8 +14,10 @@ import {
   getConnectableAppDefinition,
   getAppStoreDefinition,
   getRecommendedConnectionMethod,
+  isSuggestedAskFirstAction,
   recommendedDefaultsForApp,
   resolveConnectionMethodServerUrl,
+  suggestedAskFirstReasons,
 } from "./app-definitions.js";
 import {
   GOOGLE_WORKSPACE_CONNECTOR_PROFILE_IDS,
@@ -787,6 +789,7 @@ describe("AppDefinition catalog", () => {
   it("limits Ask-first defaults to reviewed high-risk connection methods", () => {
     for (const app of APP_DEFINITIONS)
       for (const method of app.methods) {
+        if (app.slug === "obsidian") continue;
         if (app.slug === "enterpret" || (app.slug === "gmail" && method.capabilityProfile?.key === "archive")) {
           expect(recommendedDefaultsForApp(app, method.key)).toEqual({
             access: "all_agents",
@@ -799,6 +802,26 @@ describe("AppDefinition catalog", () => {
           askFirstRiskLevels: [],
         });
       }
+  });
+  it("suggests Ask first for Obsidian patch_note and says why (#11)", () => {
+    const obsidian = APP_DEFINITIONS.find((app) => app.slug === "obsidian")!;
+    const defaults = recommendedDefaultsForApp(obsidian, obsidian.methods[0]!.key);
+    expect(defaults).toMatchObject({ access: "all_agents", askFirstRiskLevels: [] });
+    expect(isSuggestedAskFirstAction(defaults, { toolName: "patch_note", riskLevel: "write" })).toBe(true);
+    // The other writing tools keep the open default; the owner chooses for them.
+    for (const toolName of ["write_note", "move_note", "move_file", "update_frontmatter", "manage_tags", "read_note"])
+      expect(isSuggestedAskFirstAction(defaults, { toolName, riskLevel: "write" })).toBe(false);
+    const reasons = suggestedAskFirstReasons(defaults);
+    expect([...reasons.keys()]).toEqual(["patch_note"]);
+    expect(reasons.get("patch_note")).toMatch(/remove text/);
+  });
+  it("matches Ask-first suggestions by risk level and ignores malformed fields", () => {
+    expect(isSuggestedAskFirstAction({ askFirstRiskLevels: ["write"] }, { toolName: "x", riskLevel: "write" })).toBe(true);
+    expect(isSuggestedAskFirstAction({ askFirstRiskLevels: ["write"] }, { toolName: "x", riskLevel: "read" })).toBe(false);
+    expect(isSuggestedAskFirstAction({ askFirstRiskLevels: "write", askFirstActions: "x" }, { toolName: "x", riskLevel: "write" })).toBe(false);
+    expect(isSuggestedAskFirstAction({ askFirstActions: [{ toolName: 3 }, null] }, { toolName: "x", riskLevel: "write" })).toBe(false);
+    expect(isSuggestedAskFirstAction(undefined, { toolName: "x", riskLevel: "write" })).toBe(false);
+    expect(suggestedAskFirstReasons({ askFirstActions: [{ toolName: "x" }] }).size).toBe(0);
   });
   it("defaults explicit read/write capability groups to their write-capable method", () => {
     const drive = APP_DEFINITIONS.find((app) => app.slug === "google-drive")!;

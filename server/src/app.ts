@@ -137,6 +137,7 @@ import { goalRoutes } from "./routes/goals.js";
 import { onboardingSeedRoutes } from "./routes/onboarding-seed.js";
 import { boardChatRoutes } from "./routes/board-chat.js";
 import { approvalRoutes } from "./routes/approvals.js";
+import { toolActionApprovalDecisionHandler } from "./services/tool-action-formal-approval.js";
 import { secretRoutes } from "./routes/secrets.js";
 import { toolAccessRoutes } from "./routes/tool-access.js";
 import {
@@ -835,7 +836,15 @@ export async function createApp(
   api.use(onboardingSeedRoutes(db));
   api.use(boardChatRoutes(db, { deploymentMode: opts.deploymentMode }));
   api.use(voiceSessionRoutes(db, chatChannels.voice));
-  api.use(approvalRoutes(db, { pluginWorkerManager: workerManager }));
+  api.use(approvalRoutes(db, {
+    pluginWorkerManager: workerManager,
+    // The tool gateway owns decisions on the formal approvals it creates. The
+    // gateway is constructed below; requests reach these closures after startup.
+    decisionHandlers: [toolActionApprovalDecisionHandler(db, {
+      approveActionRequest: (input) => toolGateway.approveActionRequest(input),
+      declineActionRequest: (input) => toolGateway.declineActionRequest(input),
+    })],
+  }));
   api.use(secretRoutes(db));
   api.use(managedAgentProfileRoutes(db));
   api.use(remoteAgentProfileRoutes(db));

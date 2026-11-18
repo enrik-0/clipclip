@@ -30,6 +30,7 @@ export function PermissionsPanel({
   quarantined,
   enabledIds,
   askFirstIds,
+  askFirstReasons,
   pending,
   onSaveAccess,
   onSetActionPermission,
@@ -53,6 +54,8 @@ export function PermissionsPanel({
 > & {
   connectionId: string;
   install: InstallState;
+  /** Why the app's suggested defaults put an action behind Ask first, by tool name. */
+  askFirstReasons?: ReadonlyMap<string, string>;
   onSaveAccess: (next: AccessDraft) => void;
   onSetActionPermission: (ids: string[], next: ActionPermission) => void;
   onReviewQuarantined: (enabledIds: string[]) => void;
@@ -86,6 +89,7 @@ export function PermissionsPanel({
         quarantined={quarantined}
         enabledIds={enabledIds}
         askFirstIds={askFirstIds}
+        askFirstReasons={askFirstReasons}
         disabled={pending}
         refreshPending={refreshPending}
         focusId={searchParams.get("focus")}
@@ -205,6 +209,7 @@ export function ActionsSection({
   quarantined,
   enabledIds,
   askFirstIds,
+  askFirstReasons,
   disabled,
   refreshPending,
   focusId,
@@ -221,6 +226,7 @@ export function ActionsSection({
   quarantined: ToolCatalogEntry[];
   enabledIds: Set<string>;
   askFirstIds: Set<string>;
+  askFirstReasons?: ReadonlyMap<string, string>;
   disabled: boolean;
   refreshPending: boolean;
   focusId?: string | null;
@@ -317,6 +323,7 @@ export function ActionsSection({
             appName={appName}
             enabledIds={enabledIds}
             askFirstIds={askFirstIds}
+            askFirstReasons={askFirstReasons}
             disabled={disabled}
             focusId={focusId}
             canConfigure={canConfigure}
@@ -332,6 +339,7 @@ export function ActionsSection({
             appName={appName}
             enabledIds={enabledIds}
             askFirstIds={askFirstIds}
+            askFirstReasons={askFirstReasons}
             disabled={disabled}
             focusId={focusId}
             canConfigure={canConfigure}
@@ -371,6 +379,7 @@ function ActionGroup({
   appName,
   enabledIds,
   askFirstIds,
+  askFirstReasons,
   disabled,
   focusId,
   canConfigure,
@@ -382,6 +391,7 @@ function ActionGroup({
   appName: string;
   enabledIds: Set<string>;
   askFirstIds: Set<string>;
+  askFirstReasons?: ReadonlyMap<string, string>;
   disabled: boolean;
   focusId?: string | null;
   canConfigure: boolean;
@@ -432,6 +442,7 @@ function ActionGroup({
             connectionId={connectionId}
             appName={appName}
             value={actionPermission(action.id, enabledIds, askFirstIds)}
+            askFirstReason={askFirstReasons?.get(action.toolName)}
             disabled={disabled}
             focused={focusId === action.id}
             canConfigure={canConfigure}
@@ -459,6 +470,7 @@ function ActionRow({
   connectionId,
   appName,
   value,
+  askFirstReason,
   disabled,
   focused,
   canConfigure,
@@ -468,6 +480,7 @@ function ActionRow({
   connectionId: string;
   appName: string;
   value: ActionPermission;
+  askFirstReason?: string;
   disabled: boolean;
   focused: boolean;
   canConfigure: boolean;
@@ -506,6 +519,12 @@ function ActionRow({
           </div>
           {action.description ? (
             <div className="truncate text-xs text-muted-foreground">{action.description}</div>
+          ) : null}
+          {askFirstReason ? (
+            <div className="mt-1 flex items-start gap-1.5 text-xs text-muted-foreground">
+              <ShieldQuestion className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>Suggested: Ask first. {askFirstReason}</span>
+            </div>
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2">

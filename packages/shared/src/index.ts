@@ -293,8 +293,10 @@ export {
   getRecommendedConnectionMethod,
   isConnectableAppSlug,
   isAppStoreVisibleSlug,
+  isSuggestedAskFirstAction,
   recommendedDefaultsForApp,
   resolveConnectionMethodServerUrl,
+  suggestedAskFirstReasons,
 } from "./app-definitions.js";
 export { isConnectorFeatureEnabled, nativeConnectorRequiresCustomerOAuthApp } from "./connector-availability.js";
 export { getAppDefinitionForApplicationKey } from "./connector-identity.js";
