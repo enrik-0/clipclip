@@ -46,7 +46,7 @@ patchedDependencies:
     hash: 25xv27loodfejozcsygclyiyau
     path: patches/acpx@0.13.1.patch
   embedded-postgres@18.1.0-beta.16:
-    hash: 55uhvnotpqyiy37rn3pqpukhei
+    hash: lugajsrw2xdg3ojwx4f5ktnz6y
     path: patches/embedded-postgres@18.1.0-beta.16.patch
   postgres@3.4.9:
     hash: 6q4cic6qawywsyeo2spgnjamda
@@ -145,7 +145,7 @@ importers:
         version: 0.45.2(@opentelemetry/api@1.9.1)(kysely@0.29.5)(pg@8.18.0)(postgres@3.4.9(patch_hash=6q4cic6qawywsyeo2spgnjamda))
       embedded-postgres:
         specifier: ^18.1.0-beta.16
-        version: 18.1.0-beta.16(patch_hash=55uhvnotpqyiy37rn3pqpukhei)
+        version: 18.1.0-beta.16(patch_hash=lugajsrw2xdg3ojwx4f5ktnz6y)
       picocolors:
         specifier: ^1.1.1
         version: 1.1.1
@@ -417,7 +417,7 @@ importers:
         version: 0.45.2(@opentelemetry/api@1.9.1)(kysely@0.29.5)(pg@8.18.0)(postgres@3.4.9(patch_hash=6q4cic6qawywsyeo2spgnjamda))
       embedded-postgres:
         specifier: ^18.1.0-beta.16
-        version: 18.1.0-beta.16(patch_hash=55uhvnotpqyiy37rn3pqpukhei)
+        version: 18.1.0-beta.16(patch_hash=lugajsrw2xdg3ojwx4f5ktnz6y)
       postgres:
         specifier: ^3.4.9
         version: 3.4.9(patch_hash=6q4cic6qawywsyeo2spgnjamda)
@@ -1060,7 +1060,7 @@ importers:
         version: 0.45.2(@opentelemetry/api@1.9.1)(kysely@0.29.5)(pg@8.18.0)(postgres@3.4.9(patch_hash=6q4cic6qawywsyeo2spgnjamda))
       embedded-postgres:
         specifier: ^18.1.0-beta.16
-        version: 18.1.0-beta.16(patch_hash=55uhvnotpqyiy37rn3pqpukhei)
+        version: 18.1.0-beta.16(patch_hash=lugajsrw2xdg3ojwx4f5ktnz6y)
       express:
         specifier: ^5.1.0
         version: 5.2.1
@@ -1128,6 +1128,9 @@ importers:
       '@github/copilot-linux-x64':
         specifier: 1.0.88
         version: 1.0.88
+      '@lydell/node-pty':
+        specifier: 1.1.0
+        version: 1.1.0
     devDependencies:
       '@opentelemetry/context-async-hooks':
         specifier: 2.10.0
@@ -3255,6 +3258,39 @@ packages:
 
   '@livekit/protocol@1.52.1':
     resolution: {integrity: sha512-X8DxKlNbzk6Lh+v630+mjdFHSotdAFwIyzxSRSUql2DbTxCnlpa7JsvFGc6Na3mXiex2OFh0iiQtWwOBP0rIYA==}
+
+  '@lydell/node-pty-darwin-arm64@1.1.0':
+    resolution: {integrity: sha512-7kFD+owAA61qmhJCtoMbqj3Uvff3YHDiU+4on5F2vQdcMI3MuwGi7dM6MkFG/yuzpw8LF2xULpL71tOPUfxs0w==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@lydell/node-pty-darwin-x64@1.1.0':
+    resolution: {integrity: sha512-XZdvqj5FjAMjH8bdp0YfaZjur5DrCIDD1VYiE9EkkYVMDQqRUPHYV3U8BVEQVT9hYfjmpr7dNaELF2KyISWSNA==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@lydell/node-pty-linux-arm64@1.1.0':
+    resolution: {integrity: sha512-yyDBmalCfHpLiQMT2zyLcqL2Fay4Xy7rIs8GH4dqKLnEviMvPGOK7LADVkKAsbsyXBSISL3Lt1m1MtxhPH6ckg==}
+    cpu: [arm64]
+    os: [linux]
+
+  '@lydell/node-pty-linux-x64@1.1.0':
+    resolution: {integrity: sha512-NcNqRTD14QT+vXcEuqSSvmWY+0+WUBn2uRE8EN0zKtDpIEr9d+YiFj16Uqds6QfcLCHfZmC+Ls7YzwTaqDnanA==}
+    cpu: [x64]
+    os: [linux]
+
+  '@lydell/node-pty-win32-arm64@1.1.0':
+    resolution: {integrity: sha512-JOMbCou+0fA7d/m97faIIfIU0jOv8sn2OR7tI45u3AmldKoKoLP8zHY6SAvDDnI3fccO1R2HeR1doVjpS7HM0w==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@lydell/node-pty-win32-x64@1.1.0':
+    resolution: {integrity: sha512-3N56BZ+WDFnUMYRtsrr7Ky2mhWGl9xXcyqR6cexfuCqcz9RNWL+KoXRv/nZylY5dYaXkft4JaR1uVu+roiZDAw==}
+    cpu: [x64]
+    os: [win32]
+
+  '@lydell/node-pty@1.1.0':
+    resolution: {integrity: sha512-VDD8LtlMTOrPKWMXUAcB9+LTktzuunqrMwkYR1DMRBkS6LQrCt+0/Ws1o2rMml/n3guePpS7cxhHF7Nm5K4iMw==}
 
   '@marijn/find-cluster-break@1.0.4':
     resolution: {integrity: sha512-Wy0V7+SGUjnF9/TkiM1hKVDPj7jKXduPNboMVtHTA8dySMURWqfg/JZ9E2Sq8JgSJmkl7k7Qe9FLeMSrSraWmQ==}
@@ -11611,6 +11647,34 @@ snapshots:
     dependencies:
       '@bufbuild/protobuf': 1.10.0
 
+  '@lydell/node-pty-darwin-arm64@1.1.0':
+    optional: true
+
+  '@lydell/node-pty-darwin-x64@1.1.0':
+    optional: true
+
+  '@lydell/node-pty-linux-arm64@1.1.0':
+    optional: true
+
+  '@lydell/node-pty-linux-x64@1.1.0':
+    optional: true
+
+  '@lydell/node-pty-win32-arm64@1.1.0':
+    optional: true
+
+  '@lydell/node-pty-win32-x64@1.1.0':
+    optional: true
+
+  '@lydell/node-pty@1.1.0':
+    optionalDependencies:
+      '@lydell/node-pty-darwin-arm64': 1.1.0
+      '@lydell/node-pty-darwin-x64': 1.1.0
+      '@lydell/node-pty-linux-arm64': 1.1.0
+      '@lydell/node-pty-linux-x64': 1.1.0
+      '@lydell/node-pty-win32-arm64': 1.1.0
+      '@lydell/node-pty-win32-x64': 1.1.0
+    optional: true
+
   '@marijn/find-cluster-break@1.0.4': {}
 
   '@mdx-js/react@3.1.1(@types/react@19.2.18)(react@19.2.8)':
@@ -14989,7 +15053,7 @@ snapshots:
 
   elkjs@0.9.3: {}
 
-  embedded-postgres@18.1.0-beta.16(patch_hash=55uhvnotpqyiy37rn3pqpukhei):
+  embedded-postgres@18.1.0-beta.16(patch_hash=lugajsrw2xdg3ojwx4f5ktnz6y):
     dependencies:
       async-exit-hook: 2.0.1
       pg: 8.18.0

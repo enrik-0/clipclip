@@ -164,6 +164,25 @@ const OSC8_HYPERLINK_RE =
 // eslint-disable-next-line no-control-regex
 const OSC_ANY_RE = /\x1b\][^\x1b\x07]*(?:\x1b\\|\x07)/g;
 
+// A Cursor Position sequence (final byte `H` or `f`). Claude Code 2.1.326 paints
+// each screen row at an absolute row and column with this sequence and writes no
+// line feed between rows, so every row boundary is one of these. The prompt
+// parser turns each one into a line break; without it the URL, the sign-in
+// preamble and the browser-code prompt run together on a single line.
+// eslint-disable-next-line no-control-regex
+const CSI_CURSOR_POSITION_RE = /\x1b\[[0-9;]*[Hf]/g;
+
+/**
+ * Restores the row structure of a screen-painted login output. Puts each OSC 8
+ * hyperlink URI on its own line (the CLI glues it right after "(c to copy)"),
+ * and turns each cursor-position sequence into a line break. It only adds line
+ * breaks. The URL and the prompt still pass the same strict validation, and the
+ * success-token parser does not use this step.
+ */
+function separatePaintedRows(text: string): string {
+  return text.replace(OSC8_HYPERLINK_RE, "\n$1\n").replace(CSI_CURSOR_POSITION_RE, "\n");
+}
+
 // Trailing punctuation that prose commonly puts right after a URL. The parser
 // strips only these characters when it compares a line to a repeated URL. It
 // never strips these from the candidate before validation, because the validator
@@ -403,7 +422,7 @@ function findBrowserCodePrompt(lines: string[], endLine: number, url: string): s
  */
 export function parseSetupTokenPrompt(text: string): SetupTokenPrompt | null {
   if (typeof text !== "string" || text.length === 0) return null;
-  const clean = stripTerminalControls(text);
+  const clean = stripTerminalControls(separatePaintedRows(text));
   const preamble = URL_PREAMBLE_RE.exec(clean);
   if (!preamble) return null;
   const afterPreamble = preamble.index + preamble[0].length;
@@ -438,6 +457,12 @@ export const SETUP_TOKEN_PREFIX = "sk-ant-oat01-";
 // right before the token block. The token parser binds the token to this anchor.
 export const SETUP_TOKEN_BEFORE_ANCHOR = "Your OAuth token (valid for 1 year):";
 
+// Claude Code 2.1.326 computes the lifetime in this line from the token's expiry
+// instead of printing a fixed "1 year", so the wording of the duration can vary
+// ("1 year", "365 days", ...). The line must still be exactly this sentence; the
+// lifetime is a short field with no parentheses, so no other text can ride in it.
+const SETUP_TOKEN_BEFORE_ANCHOR_RE = /^Your OAuth token \(valid for [^()\r\n]{1,48}\):$/;
+
 // The line that follows the token. The success screen prints this exact line
 // right after the token block. The token parser binds the token to this anchor.
 export const SETUP_TOKEN_AFTER_ANCHOR =
@@ -460,10 +485,11 @@ const FULL_TOKEN_RE = /^sk-ant-oat01-[A-Za-z0-9_-]{20,}$/;
  * null when no line matches. Returns null when more than one line matches, so a
  * duplicate success block fails closed.
  */
-function singleAnchorIndex(lines: string[], anchor: string): number | null {
+function singleAnchorIndex(lines: string[], anchor: string | RegExp): number | null {
   let found: number | null = null;
   for (let i = 0; i < lines.length; i += 1) {
-    if (lines[i].trim() !== anchor) continue;
+    const trimmed = lines[i].trim();
+    if (typeof anchor === "string" ? trimmed !== anchor : !anchor.test(trimmed)) continue;
     if (found !== null) return null;
     found = i;
   }
@@ -491,7 +517,9 @@ function singleAnchorIndex(lines: string[], anchor: string): number | null {
  */
 export function parseSetupTokenCredential(text: string): string | null {
   if (typeof text !== "string" || text.length === 0) return null;
-  const clean = stripTerminalControls(text);
+  // The 2.1.326 UI paints each row at an absolute cursor position and writes no
+  // line feed, so restore the row boundaries first (see separatePaintedRows).
+  const clean = stripTerminalControls(separatePaintedRows(text));
   // Canonicalize the record delimiter. The real terminal redraw joins the
   // before-anchor line, the token, and the after-anchor line with a bare
   // carriage return, or a CRLF pair, instead of a line feed. Map each CRLF and
@@ -502,7 +530,7 @@ export function parseSetupTokenCredential(text: string): string | null {
   const normalized = clean.replace(/\r\n|\r/g, "\n");
   const lines = normalized.split("\n");
 
-  const beforeIndex = singleAnchorIndex(lines, SETUP_TOKEN_BEFORE_ANCHOR);
+  const beforeIndex = singleAnchorIndex(lines, SETUP_TOKEN_BEFORE_ANCHOR_RE);
   const afterIndex = singleAnchorIndex(lines, SETUP_TOKEN_AFTER_ANCHOR);
   if (beforeIndex === null || afterIndex === null) return null;
   if (afterIndex <= beforeIndex) return null;

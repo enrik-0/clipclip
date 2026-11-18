@@ -3,10 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Worker } from "node:worker_threads";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   withWorktreePortRegistryLock,
   withWorktreePortRegistryLockSync,
+  writeWorktreePortRegistry,
 } from "./worktree-port-registry.js";
 
 const temporaryRoots: string[] = [];
@@ -280,5 +281,40 @@ describe("worktree port registry lock", () => {
     });
 
     expect(fs.existsSync(lockPath)).toBe(false);
+  });
+});
+
+describe("worktree port registry atomic replace on Windows", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("retries a transient EPERM when renaming over an owner or registry file", () => {
+    // On Windows, renaming over a file another handle is reading (the lock
+    // heartbeat thread reads owner.json) fails with EPERM until it is released.
+    const homeDir = makeTemporaryRoot();
+    const realRename = fs.renameSync.bind(fs);
+    let failures = 0;
+    vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+      if (failures < 3) {
+        failures += 1;
+        throw Object.assign(new Error("EPERM: operation not permitted, rename"), { code: "EPERM" });
+      }
+      return realRename(from, to);
+    });
+
+    expect(withWorktreePortRegistryLockSync(homeDir, () => "acquired")).toBe("acquired");
+    expect(failures).toBe(3);
+
+    writeWorktreePortRegistry(homeDir, []);
+    expect(fs.existsSync(path.join(homeDir, "worktree-port-reservations.json"))).toBe(true);
+  });
+
+  it("does not hide a non-transient rename failure", () => {
+    const homeDir = makeTemporaryRoot();
+    vi.spyOn(fs, "renameSync").mockImplementation(() => {
+      throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
+    });
+    expect(() => withWorktreePortRegistryLockSync(homeDir, () => "x")).toThrow(/ENOENT/);
   });
 });

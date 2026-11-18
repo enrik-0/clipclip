@@ -155,6 +155,51 @@ describe("parseSetupTokenPrompt", () => {
     expect(result?.prompt).toBe(SETUP_TOKEN_PROMPT);
   });
 
+  describe("Claude Code 2.1.326 screen layout", () => {
+    // The live UI paints every row at an absolute cursor position (CUP, `ESC[row;colH`)
+    // and writes no line feed between rows. The authorization URL is an inline OSC 8
+    // hyperlink glued to "(c to copy)" and the prompt follows on the same stream.
+    // Values are synthetic; the structure is the one captured from the real CLI.
+    const ESC = "\x1b";
+    const url326 =
+      "https://claude.com/cai/oauth/authorize?code=true"
+      + `&client_id=${CLIENT_ID}&response_type=code`
+      + `&redirect_uri=${encodeURIComponent(SETUP_TOKEN_REDIRECT_URI)}&scope=user%3Ainference`
+      + `&code_challenge=${CODE_CHALLENGE}&code_challenge_method=S256&state=${STATE}`;
+    const screen = (display: string) => [
+      "Welcome to Claude Code v2.1.326\r\n",
+      `${ESC}[38;2;255;255;255m·${ESC}[mBrowser didn't open?${ESC}[1CUse the URL${ESC}[1Cbelow${ESC}[1Cto`,
+      `${ESC}[1Csign${ESC}[1Cin${ESC}[38;2;153;153;153m${ESC}[1C(c to copy)`,
+      `${ESC}]8;id=u-qjygl5%12449145447245439509;${url326}${ESC}\\${display}${ESC}]8;;${ESC}\\`,
+      `${ESC}[25;2HPaste${ESC}[1Ccode${ESC}[1Chere${ESC}[1Cif${ESC}[1Cprompted`,
+      `${ESC}[26;2H╭${"─".repeat(40)}╮${ESC}[27;2H│${ESC}[7m${ESC}[1C ${ESC}[27m${ESC}[40C│${ESC}[28;2H╰${"─".repeat(40)}╯`,
+    ].join("");
+
+    it("reads the inline hyperlink URL and the cursor-positioned prompt", () => {
+      const wrappedDisplay = `${ESC}[22;1H${url326.slice(0, 130)}\r\n${url326.slice(130)}${ESC}[m`;
+      const result = parseSetupTokenPrompt(screen(wrappedDisplay));
+      expect(result).not.toBeNull();
+      expect(result?.url).toBe(url326);
+      expect(result?.prompt).toBe(SETUP_TOKEN_PROMPT);
+    });
+
+    it("still reads it when the output arrives in small chunks", () => {
+      const text = screen(`${ESC}[22;1H${url326}${ESC}[m`);
+      let buffer = "";
+      let found: ReturnType<typeof parseSetupTokenPrompt> = null;
+      for (let i = 0; i < text.length && !found; i += 37) {
+        buffer += text.slice(i, i + 37);
+        found = parseSetupTokenPrompt(buffer);
+      }
+      expect(found?.url).toBe(url326);
+    });
+
+    it("does not bind a URL that is not preceded by the sign-in preamble", () => {
+      const text = screen(`${ESC}[22;1H${url326}${ESC}[m`).replace("Use the URL", "Open this link");
+      expect(parseSetupTokenPrompt(text)).toBeNull();
+    });
+  });
+
   it("returns null for a wrong host", () => {
     const badHost = CLAUDE_COM_URL.replace("https://claude.com", "https://claude.example.com");
     expect(parseSetupTokenPrompt(completeOutput(badHost))).toBeNull();
@@ -505,6 +550,44 @@ function successScreen(body: string[]): string {
 }
 
 describe("parseSetupTokenCredential", () => {
+  describe("Claude Code 2.1.326 success screen", () => {
+    // The 2.1.326 UI paints each row at an absolute cursor position (CUP), spaces
+    // words with cursor-forward sequences, and computes the token lifetime in the
+    // anchor line from the expiry timestamp instead of printing a fixed
+    // "1 year". The token and the lines around it are synthetic.
+    const ESC = "\x1b";
+    const words = (text: string) => text.split(" ").join(`${ESC}[1C`);
+    const paintedScreen = (lifetime: string, token = FULL_TOKEN) => [
+      `${ESC}[2;1H${ESC}[32m✓${ESC}[m ${words("Long-lived authentication token created successfully!")}`,
+      `${ESC}[4;1H${words(`Your OAuth token (valid for ${lifetime}):`)}`,
+      `${ESC}[6;1H${ESC}[33m${token}${ESC}[m`,
+      `${ESC}[8;1H${ESC}[2m${words(SETUP_TOKEN_AFTER_ANCHOR)}${ESC}[m`,
+      `${ESC}[10;1H${words("Use this token by setting: export CLAUDE_CODE_OAUTH_TOKEN=<token>")}`,
+    ].join("");
+
+    it.each(["1 year", "365 days", "12 months", "11 months, 30 days", "31535999 seconds"])(
+      "binds the token when the screen is painted with cursor positioning and says 'valid for %s'",
+      (lifetime) => {
+        expect(parseSetupTokenCredential(paintedScreen(lifetime))).toBe(FULL_TOKEN);
+      },
+    );
+
+    it("binds a token wrapped across two painted rows", () => {
+      const text = paintedScreen("1 year", `${TOKEN_FRAGMENT_A}${ESC}[7;1H${TOKEN_FRAGMENT_B}`);
+      expect(parseSetupTokenCredential(text)).toBe(FULL_TOKEN);
+    });
+
+    it("rejects a lifetime field that smuggles extra text into the anchor line", () => {
+      expect(parseSetupTokenCredential(paintedScreen("1 year) and more text ("))).toBeNull();
+      expect(parseSetupTokenCredential(paintedScreen(`1 year${"x".repeat(80)}`))).toBeNull();
+    });
+
+    it("still rejects a token printed outside the two anchors", () => {
+      const text = `${ESC}[2;1H${FULL_TOKEN}${ESC}[4;1H${words("Something else entirely")}`;
+      expect(parseSetupTokenCredential(text)).toBeNull();
+    });
+  });
+
   it("returns the de-wrapped token from the exact success record once", () => {
     const text = successScreen([TOKEN_FRAGMENT_A, TOKEN_FRAGMENT_B]);
     expect(parseSetupTokenCredential(text)).toBe(FULL_TOKEN);

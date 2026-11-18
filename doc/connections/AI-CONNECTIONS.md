@@ -491,7 +491,12 @@ onboarding, and agent setup share `LocalProviderLoginInstructions` and
 browser sign-in card. Claude accepts the authorization code in that card; Codex
 displays its device code there. The user does not run a shell command. Each
 local runner requires Python 3 for its pseudo-terminal (included in the Docker
-image) and the corresponding provider CLI on the Paperclip host. Each
+image) and the corresponding provider CLI on the Paperclip host. On Windows
+there is no Python `pty` module, so the runner uses ConPTY through the optional
+`@lydell/node-pty` dependency instead, and npm `.cmd` shims are launched through
+`cmd.exe`. Google (Antigravity) sign-in relies on the native ACPX runner, which
+needs Linux or macOS; on a Windows host it reports that it is unsupported, so
+run Paperclip on Linux, macOS or WSL, or use a sandbox environment. Each
 attempt retains a private credential home. The home is never seeded with the
 operator's existing login: copying a rotating refresh token would
 allow managed runs to invalidate credentials still used by legacy agents or the

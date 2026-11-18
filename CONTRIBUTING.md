@@ -51,7 +51,7 @@ PRs that follow this path are **much** more likely to be accepted, even when the
 
 ### Use the PR Template
 
-Every pull request **must** follow the PR template at [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md). If you create a PR via the GitHub API or other tooling that bypasses the template, copy its contents into your PR description manually. The template includes required sections: Thinking Path, What Changed, Verification, Risks, Model Used, and a Checklist.
+Every pull request **must** follow the PR template at [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md). If you create a PR via the GitHub API or other tooling that bypasses the template, copy its contents into your PR description manually. The template includes required sections: Thinking Path, What Changed, Verification, Risks, and a Checklist.
 
 ### Link Issues or Describe Them In-PR
 
@@ -104,10 +104,6 @@ Screenshots, screen recordings, and other review evidence belong in the PR descr
 To show a visual change, drag the image into the PR description or a comment on GitHub, which hosts the file for you. If your tooling cannot upload to GitHub, leave the images out and describe what you checked under **Verification**.
 
 Images that are part of the product documentation itself, such as a screenshot embedded in a guide under `doc/`, are fine to commit.
-
-### Model Used (Required)
-
-Every PR must include a **Model Used** section specifying which AI model produced or assisted with the change. Include the provider, exact model ID/version, context window size, and any relevant capability details (e.g., reasoning mode, tool use). If no AI was used, write "None — human-authored". This applies to all contributors — human and AI alike.
 
 ### Tests Must Pass
 
