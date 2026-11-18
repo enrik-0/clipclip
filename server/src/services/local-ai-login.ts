@@ -303,7 +303,11 @@ export function localAiLoginService(db: Db) {
           ? { error: "The server restarted during sign-in. Start sign-in again." }
           : login?.outcome === "failure"
             ? { error: login.error ?? "Sign-in ended before the account was connected. Start sign-in again." }
-            : {}) };
+            // The CLI finished and delivered its credential, but this host could not
+            // read it back; without a message the card just stays on the code field.
+            : login?.outcome === "success"
+              ? { error: "Sign-in finished, but the saved credential could not be read on this host. Start sign-in again." }
+              : {}) };
     }
   }
 

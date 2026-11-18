@@ -20,6 +20,7 @@ vi.mock("@paperclipai/adapter-utils/server-utils", async (importOriginal) => ({ 
 vi.mock("../vendor/paperclip-runner/index.js", () => runnerMock);
 
 import { startLocalBrowserLogin } from "./local-ai-browser-login.js";
+import { readVerifiedLocalAiCredential } from "./local-ai-credentials.js";
 
 const initialPlatform = Object.getOwnPropertyDescriptor(process, "platform")!;
 const CLAUDE_URL = "https://claude.com/cai/oauth/authorize?client_id=cid&code=abcdefgh&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&response_type=code&scope=user&state=0123456789abcdef";
@@ -81,6 +82,9 @@ describe("local browser subscription login on Windows", () => {
     await vi.waitFor(() => expect(login.outcome).toBe("success"), { timeout: 5000 });
     const credential = JSON.parse(await readFile(path.join(home, ".credentials.json"), "utf8"));
     expect(credential.claudeAiOauth.accessToken).toMatch(/^sk-ant-oat01-/);
+    // The same read the sign-in card's status check uses must accept that file;
+    // when it threw, the card stayed on the code field with no error.
+    await expect(readVerifiedLocalAiCredential("anthropic", home)).resolves.toMatch(/^sk-ant-oat01-/);
   });
 
   it("surfaces the Codex device link and code through ConPTY", async () => {
