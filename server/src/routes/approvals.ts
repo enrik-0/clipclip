@@ -24,6 +24,7 @@ import type { PluginWorkerManager } from "../services/plugin-worker-manager.js";
 import { issueService } from "../services/issues.js";
 import { approvalReadSqlCondition, canActorReadApproval } from "../services/authorization.js";
 import { REVIEW_PATH_RECOVERY_INSTRUCTION } from "../services/recovery/review-path-recovery.js";
+import { findApprovalDecisionHandler, type ApprovalDecisionHandler } from "../services/approval-decision-handlers.js";
 
 function redactApprovalPayload<T extends { payload: Record<string, unknown> }>(approval: T): T {
   return {
@@ -43,7 +44,11 @@ function isStatusOnlyRecoveryContext(contextSnapshot: unknown) {
 
 export function approvalRoutes(
   db: Db,
-  options: { pluginWorkerManager?: PluginWorkerManager } = {},
+  options: {
+    pluginWorkerManager?: PluginWorkerManager;
+    /** Owners of approval types whose decision does more than set a status. */
+    decisionHandlers?: readonly ApprovalDecisionHandler[];
+  } = {},
 ) {
   const router = Router();
   router.param("id", async (req, res, next, id) => {
@@ -293,14 +298,34 @@ export function approvalRoutes(
     res.json(issues);
   });
 
+  // The owning module applies the decision, resolves the approval, logs it and
+  // tells the requester. Returns null when no module owns this approval.
+  async function decideWithOwner(
+    existing: NonNullable<Awaited<ReturnType<typeof svc.getById>>>,
+    decision: "approved" | "rejected",
+    decidedByUserId: string,
+    decisionNote: string | null | undefined,
+  ) {
+    const handler = findApprovalDecisionHandler(options.decisionHandlers, existing);
+    if (!handler) return null;
+    await handler.decide({ approval: existing, decision, decidedByUserId, decisionNote });
+    return (await svc.getById(existing.id)) ?? existing;
+  }
+
   router.post("/approvals/:id/approve", validate(resolveApprovalSchema), async (req, res) => {
     assertBoard(req);
     const id = req.params.id as string;
-    if (!(await requireApprovalAccess(req, id))) {
+    const existing = await requireApprovalAccess(req, id);
+    if (!existing) {
       res.status(404).json({ error: "Approval not found" });
       return;
     }
     const decidedByUserId = req.actor.userId ?? "board";
+    const ownerDecision = await decideWithOwner(existing, "approved", decidedByUserId, req.body.decisionNote);
+    if (ownerDecision) {
+      res.json(redactApprovalPayload(ownerDecision));
+      return;
+    }
     const { approval, applied } = await svc.approve(id, decidedByUserId, req.body.decisionNote);
 
     if (applied) {
@@ -412,11 +437,17 @@ export function approvalRoutes(
   router.post("/approvals/:id/reject", validate(resolveApprovalSchema), async (req, res) => {
     assertBoard(req);
     const id = req.params.id as string;
-    if (!(await requireApprovalAccess(req, id))) {
+    const existing = await requireApprovalAccess(req, id);
+    if (!existing) {
       res.status(404).json({ error: "Approval not found" });
       return;
     }
     const decidedByUserId = req.actor.userId ?? "board";
+    const ownerDecision = await decideWithOwner(existing, "rejected", decidedByUserId, req.body.decisionNote);
+    if (ownerDecision) {
+      res.json(redactApprovalPayload(ownerDecision));
+      return;
+    }
     const { approval, applied } = await svc.reject(id, decidedByUserId, req.body.decisionNote);
 
     if (applied) {

@@ -52,6 +52,37 @@ Rules:
 
 The check is in `server/src/services/tool-argument-schema.ts`.
 
+## High-risk actions: one decision
+
+A `destructive` action also gets a formal board approval in the Inbox, linked
+to the task. One decision is enough, from either place:
+
+- **Approve** in the Inbox, or **Approve & run** on the task card, resolves the
+  formal approval and the action request in one review transaction. The action
+  then runs once with the signed, stored arguments, and the outcome is recorded
+  on the request and on the card (Succeeded or Execution failed).
+- **Reject** in the Inbox, or **Decline** on the card, resolves both records.
+  The action does not run.
+- The agent is woken only after the outcome is recorded, through the
+  continuation described below. The wake carries the result, the failure or
+  the decline. The approvals route does not send its own requester wake for
+  these approvals.
+- The action runs at most once. Execution claims the request with a guarded
+  `approved` to `executing` update, so concurrent decisions from the Inbox and
+  the card, or repeated clicks, run it once. A repeated decision returns the
+  recorded outcome.
+- A formal approval that is already rejected or cancelled blocks the card
+  approval. If the action expired or was cancelled before the Inbox decision,
+  the Inbox decision closes the formal approval as cancelled and nothing runs.
+
+Ownership: the approvals routes keep the access checks (board user with access
+to the company). They pass decisions on approvals with `source: "tool_gateway"`
+to a handler that the tool gateway registers
+(`server/src/services/approval-decision-handlers.ts`,
+`server/src/services/tool-action-formal-approval.ts`). The review transaction
+in `server/src/services/tool-action-review.ts` resolves the formal approval and
+writes the `approval.approved` or `approval.rejected` activity entry.
+
 ## Remembered permission
 
 Choose **Always allow** from the split button beside **Approve & run**. It

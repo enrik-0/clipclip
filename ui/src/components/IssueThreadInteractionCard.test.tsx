@@ -1423,6 +1423,35 @@ describe("IssueThreadInteractionCard tool-action card", () => {
     expect(host.textContent).not.toContain("Roadmap");
   });
 
+  it.each([
+    ["executed", "Succeeded"],
+    ["failed", "Execution failed"],
+  ] as const)("shows the %s outcome of a destructive action decided once in the Inbox, with no second approval (#9)", (status, label) => {
+    // The server resolves the card in the same decision as the formal approval.
+    const decided = {
+      ...pendingToolActionDestructiveInteraction,
+      status: "accepted" as const,
+      resolvedByUserId: "board-user",
+      resolvedAt: new Date("2026-11-18T10:00:00.000Z"),
+      result: {
+        version: 1 as const,
+        outcome: "accepted" as const,
+        toolAction: {
+          version: 1 as const,
+          status,
+          ...(status === "failed" ? { errorMessage: "Note not found." } : { resultSummary: "Note moved to trash." }),
+          updatedAt: "2026-11-18T10:00:01.000Z",
+        },
+      },
+    };
+    const host = renderCard({ interaction: decided, onAcceptInteraction: vi.fn(), onRejectInteraction: vi.fn() });
+
+    expect(host.textContent).toContain(label);
+    const buttons = Array.from(host.querySelectorAll("button")).map((button) => button.textContent);
+    expect(buttons).not.toContain("Approve & run");
+    expect(buttons).not.toContain("Decline");
+  });
+
   it("distinguishes failed (ran + connector error) from declined (did not run)", () => {
     const failed = renderCard({ interaction: failedToolActionInteraction });
     expect(failed.textContent).toContain("Execution failed");

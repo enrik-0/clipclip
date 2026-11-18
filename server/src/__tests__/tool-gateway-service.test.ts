@@ -52,6 +52,7 @@ import { commitToolActionReview } from "../services/tool-action-review.js";
 import { bindVerifiedToolApprovalArguments, claimToolTestApproval, releaseToolApproval, startToolInvocation } from "../services/tool-approval-execution.js";
 import { materializeNativeInteractionResponses } from "../services/native-runtime/native-interaction-bridge.js";
 import { toolActionDeliveryService } from "../services/tool-action-delivery.js";
+import { toolActionApprovalDecisionHandler } from "../services/tool-action-formal-approval.js";
 import { secretService } from "../services/secrets.js";
 import { toolAccessService } from "../services/tool-access.js";
 import {
@@ -3011,6 +3012,189 @@ describeEmbeddedPostgres("tool gateway service", () => {
     });
     expect(result.status).toBe("completed");
     expect((result.result as { result?: { data?: { target?: string } } }).result?.data?.target).toBe("repo");
+  });
+
+  describe("one decision for a high-risk action (#9)", () => {
+    async function destructiveRequestFixture() {
+      const { company, agent, issue, run } = await createRunFixture(db);
+      // A connected MCP tool marked destructive, like Obsidian delete_note.
+      const { connection, catalogEntry } = await createRemoteMcpToolFixture(db, company.id);
+      await db.update(toolCatalogEntries).set({
+        name: "delete_note", toolName: "delete_note", riskLevel: "destructive",
+        isReadOnly: false, isWrite: true, isDestructive: true,
+        inputSchema: { type: "object", properties: { target: { type: "string" } }, required: ["target"] },
+      }).where(eq(toolCatalogEntries.id, catalogEntry.id));
+      await db.insert(toolPolicies).values({
+        companyId: company.id,
+        name: "Review destructive tools",
+        policyType: "require_approval",
+        selectors: { riskLevel: "destructive" },
+      });
+      const executeSpy = vi.fn((_name: string, _args: unknown) => {});
+      const remoteHttpRequest = async (_url: string | URL, init: RequestInit) => {
+        const request = JSON.parse(String(init.body));
+        if (request.method === "tools/call") executeSpy(request.params.name, request.params.arguments);
+        return Response.json({ jsonrpc: "2.0", id: request.id, result: {
+          content: [{ type: "text", text: `deleted ${JSON.stringify(request.params?.arguments ?? {})}` }],
+        } });
+      };
+      const wakeup = vi.fn(async (agentId: string, input: any) => {
+        const [wake] = await db.insert(agentWakeupRequests).values({
+          companyId: company.id, agentId, source: input.source, idempotencyKey: input.idempotencyKey, payload: input.payload,
+        }).returning();
+        return wake as any;
+      });
+      const deliveries = toolActionDeliveryService(db, { wakeup });
+      const gateway = createTestToolGatewayService(db, {
+        remoteHttpRequest,
+        onToolActionSettled: deliveries.deliver,
+      });
+      const session = await gateway.createSession(runSessionInput(company, agent, run));
+      const tool = (await gateway.listToolsForSession(session.token)).find((entry) => entry.connectionId === connection.id)!;
+      expect(tool.risk).toBe("destructive");
+      await expect(gateway.executeTool({
+        sessionToken: session.token,
+        tool: tool.name,
+        parameters: { target: "obsolete-note" },
+      })).rejects.toMatchObject({ reasonCode: "approval_required" });
+      const [actionRequest] = await db.select().from(toolActionRequests);
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, actionRequest!.approvalId!));
+      expect(approval).toMatchObject({ status: "pending", type: "request_board_approval" });
+      const handler = toolActionApprovalDecisionHandler(db, gateway);
+      // The original run must end before the continuation wake is delivered.
+      const endRun = async () => {
+        await db.update(heartbeatRuns).set({ status: "succeeded" }).where(eq(heartbeatRuns.id, run.id));
+        await deliveries.deliverForRun({ companyId: company.id, runId: run.id });
+      };
+      return { company, agent, issue, run, gateway, handler, actionRequest: actionRequest!, approval: approval!, executeSpy, wakeup, endRun };
+    }
+
+    it("approving the formal approval in the Inbox runs the action once and wakes the agent with the result", async () => {
+      const fixture = await destructiveRequestFixture();
+      expect(fixture.handler.handles(fixture.approval)).toBe(true);
+
+      await fixture.handler.decide({ approval: fixture.approval, decision: "approved", decidedByUserId: "board-user" });
+
+      expect(fixture.executeSpy).toHaveBeenCalledTimes(1);
+      expect(fixture.executeSpy.mock.calls[0]![1]).toEqual({ target: "obsolete-note" });
+      const [request] = await db.select().from(toolActionRequests);
+      expect(request).toMatchObject({ status: "executed", decidedByUserId: "board-user" });
+      expect(request!.decidedAt).toBeInstanceOf(Date);
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval).toMatchObject({ status: "approved", decidedByUserId: "board-user" });
+      const [interaction] = await db.select().from(issueThreadInteractions).where(eq(issueThreadInteractions.id, request!.interactionId!));
+      expect(interaction).toMatchObject({ status: "accepted", result: { toolAction: { status: "executed" } } });
+      const [invocation] = await db.select().from(toolInvocations).where(eq(toolInvocations.id, request!.invocationId));
+      expect(invocation).toMatchObject({ status: "succeeded", approvalState: "approved" });
+      const activity = await db.select().from(activityLog).where(eq(activityLog.entityId, fixture.approval.id));
+      expect(activity.map((row) => row.action)).toContain("approval.approved");
+
+      // No wake while the action had not run; one wake with the result after the run ends.
+      expect(fixture.wakeup).not.toHaveBeenCalled();
+      await fixture.endRun();
+      expect(fixture.wakeup).toHaveBeenCalledTimes(1);
+      expect(fixture.wakeup.mock.calls[0]![1].payload.toolAction).toMatchObject({
+        executionStatus: "executed",
+        resultSummary: expect.stringContaining("obsolete-note"),
+      });
+
+      // A second decision from either place does not run the action again.
+      await fixture.handler.decide({ approval: fixture.approval, decision: "approved", decidedByUserId: "board-user" });
+      await fixture.gateway.approveActionRequest({
+        companyId: fixture.company.id, issueId: fixture.issue.id, interactionId: request!.interactionId!,
+        actionRequestId: request!.id, actor: { userId: "board-user" },
+      });
+      expect(fixture.executeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("Approve & run on the task card resolves the formal approval in the same decision", async () => {
+      const fixture = await destructiveRequestFixture();
+
+      const resolution = await fixture.gateway.approveActionRequest({
+        companyId: fixture.company.id, issueId: fixture.issue.id, interactionId: fixture.actionRequest.interactionId!,
+        actionRequestId: fixture.actionRequest.id, actor: { userId: "board-user" },
+      });
+
+      expect(resolution).toMatchObject({ status: "executed" });
+      expect(fixture.executeSpy).toHaveBeenCalledTimes(1);
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval).toMatchObject({ status: "approved", decidedByUserId: "board-user" });
+      // The Inbox item is now resolved; approving it again does nothing more.
+      await fixture.handler.decide({ approval: approval!, decision: "approved", decidedByUserId: "board-user" });
+      expect(fixture.executeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs the action once when the Inbox and the card approve at the same time", async () => {
+      const fixture = await destructiveRequestFixture();
+
+      const outcomes = await Promise.allSettled([
+        fixture.handler.decide({ approval: fixture.approval, decision: "approved", decidedByUserId: "board-user" }),
+        fixture.gateway.approveActionRequest({
+          companyId: fixture.company.id, issueId: fixture.issue.id, interactionId: fixture.actionRequest.interactionId!,
+          actionRequestId: fixture.actionRequest.id, actor: { userId: "other-board-user" },
+        }),
+      ]);
+
+      expect(outcomes.some((outcome) => outcome.status === "fulfilled")).toBe(true);
+      expect(fixture.executeSpy).toHaveBeenCalledTimes(1);
+      const [request] = await db.select().from(toolActionRequests);
+      expect(request!.status).toBe("executed");
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval!.status).toBe("approved");
+    });
+
+    it("rejecting in the Inbox declines the action, never runs it and tells the agent", async () => {
+      const fixture = await destructiveRequestFixture();
+
+      await fixture.handler.decide({
+        approval: fixture.approval, decision: "rejected", decidedByUserId: "board-user", decisionNote: "Keep the note",
+      });
+
+      expect(fixture.executeSpy).not.toHaveBeenCalled();
+      const [request] = await db.select().from(toolActionRequests);
+      expect(request).toMatchObject({ status: "rejected", decidedByUserId: "board-user" });
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval).toMatchObject({ status: "rejected", decisionNote: "Keep the note" });
+      const [interaction] = await db.select().from(issueThreadInteractions).where(eq(issueThreadInteractions.id, request!.interactionId!));
+      expect(interaction).toMatchObject({ status: "rejected", result: { outcome: "rejected", reason: "Keep the note" } });
+      await fixture.endRun();
+      expect(fixture.wakeup).toHaveBeenCalledTimes(1);
+      expect(fixture.wakeup.mock.calls[0]![1].payload.toolAction).toMatchObject({ executionStatus: "rejected" });
+
+      // The card cannot approve and run a rejected action afterwards.
+      await expect(fixture.gateway.approveActionRequest({
+        companyId: fixture.company.id, actionRequestId: request!.id, actor: { userId: "board-user" },
+      })).rejects.toMatchObject({ status: 409 });
+      expect(fixture.executeSpy).not.toHaveBeenCalled();
+    });
+
+    it("declining on the task card also rejects the formal approval", async () => {
+      const fixture = await destructiveRequestFixture();
+
+      await fixture.gateway.declineActionRequest({
+        companyId: fixture.company.id, issueId: fixture.issue.id, interactionId: fixture.actionRequest.interactionId!,
+        actionRequestId: fixture.actionRequest.id, actor: { userId: "board-user" },
+      });
+
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval).toMatchObject({ status: "rejected", decidedByUserId: "board-user" });
+      await expect(fixture.handler.decide({ approval: approval!, decision: "approved", decidedByUserId: "board-user" }))
+        .rejects.toMatchObject({ status: 409 });
+      expect(fixture.executeSpy).not.toHaveBeenCalled();
+    });
+
+    it("closes the formal approval when its action expired, without running anything", async () => {
+      const fixture = await destructiveRequestFixture();
+      await db.update(toolActionRequests).set({ status: "expired", resolvedAt: new Date() })
+        .where(eq(toolActionRequests.id, fixture.actionRequest.id));
+
+      await expect(fixture.handler.decide({ approval: fixture.approval, decision: "approved", decidedByUserId: "board-user" }))
+        .rejects.toMatchObject({ status: 409 });
+
+      expect(fixture.executeSpy).not.toHaveBeenCalled();
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval!.status).toBe("cancelled");
+    });
   });
 
   it.each([

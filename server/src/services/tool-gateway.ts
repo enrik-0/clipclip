@@ -2777,9 +2777,9 @@ export function createToolGatewayService(
           requestedByAgentId: input.session.originatingAgentId ?? input.session.agentId,
           payload: {
             title: `Approve high-risk tool action: ${input.tool.name}`,
-            summary: `${input.tool.name} is classified as ${input.tool.risk} and requires formal board approval before execution.`,
+            summary: `${input.tool.name} is classified as ${input.tool.risk}. One decision is enough: approving here or with Approve & run on the task runs it once with the reviewed arguments, and rejecting here or declining on the task stops it.`,
             recommendedAction:
-              "Approve only if the reviewed arguments match the intended operation.",
+              "Approve only if the reviewed arguments match the intended operation. The requesting agent is woken with the result after the action runs.",
             risks: [
               "The tool may perform irreversible or externally visible side effects.",
               "Execution will use the stored reviewed arguments exactly once.",
@@ -10467,6 +10467,9 @@ export function createToolGatewayService(
         );
       }
       if (actionRequest.approvalId) {
+        // One decision resolves both records: this human approval also
+        // resolves the formal board approval in the review transaction.
+        // Only a formal approval that is gone, rejected or cancelled blocks it.
         const [formalApproval] = await db
           .select({ status: approvals.status })
           .from(approvals)
@@ -10477,13 +10480,17 @@ export function createToolGatewayService(
             ),
           )
           .limit(1);
-        if (!formalApproval || formalApproval.status !== "approved") {
+        if (!formalApproval || formalApproval.status === "rejected" || formalApproval.status === "cancelled") {
           throw new ToolGatewayHttpError(
             409,
-            "Tool action request requires formal board approval before execution",
-            "formal_approval_required",
+            "The formal board approval for this tool action was rejected or is no longer available",
+            "formal_approval_unavailable",
             { approvalId: actionRequest.approvalId },
           );
+        }
+        if (actionRequest.status === "approved" && formalApproval.status !== "approved") {
+          // An earlier release approved the action without the formal approval.
+          await commitToolActionReview(db, { ...input, decision: "approved" });
         }
       }
       if (actionRequest.status === "approved") {
