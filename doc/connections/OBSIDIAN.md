@@ -24,14 +24,20 @@ This works only when Paperclip runs on the computer that holds the vault.
 1. Open **Connectors** and choose **Obsidian**.
 2. Enter the **Vault folder**: the full path of the vault on the computer that
    runs Paperclip. In Obsidian, the vault switcher shows it.
-3. Optional: under the advanced options, turn on **Read only**. Agents can then
-   search and read notes but cannot change them.
-4. Connect. Paperclip checks that the folder exists.
+3. Optional: make the connection read only. The form shows the current choice,
+   **Read and write** or **Read only**, above the access summary. To change it,
+   select **Change** and turn on **Read only**. Agents can then search and read
+   notes but cannot change them.
+4. Connect. Paperclip checks that the folder exists. If the folder does not
+   exist or is a drive root, the form shows that message and no connection is
+   saved.
 5. Choose which tools are allowed, which need approval, and which agents can use
    the connection. Until this step is done, no agent has any of the tools.
 
 Repeat the steps for each vault. One company can connect several vaults, each
-with its own name, folder and permissions. A common setup is a read-only
+with its own name, folder and permissions. The form has no name field: a new
+connection is named after its vault folder, for example "Obsidian (Work notes)
+for the organization". You can rename it later from the connection page. A common setup is a read-only
 connection to a shared procedures vault and a writing connection to a vault for
 deliverables.
 

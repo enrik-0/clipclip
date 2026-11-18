@@ -23,7 +23,9 @@ export function isOAuthEndpointRejection(error: unknown): boolean {
 export function healthFailureHttpStatus(failure: {
   status: ToolConnectionHealthStatus;
   code: string;
+  setupInputError?: boolean;
 }): number {
+  if (failure.setupInputError) return 422;
   if (failure.status === "missing_secret") return 422;
   if (failure.code === "oauth_challenge") return 422;
   if (failure.code === "oauth_refresh_missing") return 422;
@@ -50,6 +52,8 @@ export function sanitizeHttpFailure(error: unknown): {
   status: ToolConnectionHealthStatus;
   message: string;
   code: string;
+  /** The person must change what they entered; a retry cannot succeed. */
+  setupInputError?: boolean;
 } {
   if (error instanceof HttpError) {
     const code = asRecord(error.details).code;
@@ -138,6 +142,18 @@ export function sanitizeHttpFailure(error: unknown): {
         status: "missing_secret",
         message: "A configured credential secret could not be resolved.",
         code: "secret_missing",
+      };
+    }
+    // A 400 or 422 that is still here is Paperclip's own check of what the
+    // person entered, such as a vault folder that does not exist. Network
+    // failures that the egress guard reports as 400 (`remote_http_*`) were
+    // handled above and keep their 502.
+    if (error.status === 400 || error.status === 422) {
+      return {
+        status: "error",
+        message: error.message,
+        code: typeof code === "string" && code ? code : "connection_setup_invalid",
+        setupInputError: true,
       };
     }
     return { status: "error", message: error.message, code: "paperclip_error" };
