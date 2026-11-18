@@ -83,6 +83,7 @@ export function startLocalBrowserLogin(provider: "anthropic" | "openai" | "googl
   const args = provider === "anthropic" ? ["setup-token"] : ["login", "--device-auth"];
   let child: ChildProcessWithoutNullStreams | null = null;
   let windowsPty: WindowsPty | null = null;
+  let windowsPtyExited = false;
   const driver = {
     async start(_command: string, onData: (chunk: string) => void): Promise<{ exitCode: number | null }> {
       const windows = process.platform === "win32";
@@ -135,11 +136,11 @@ export function startLocalBrowserLogin(provider: "anthropic" | "openai" | "googl
         const commandArgs: string[] | string = shim ? `/d /s /c ""${executable}" ${args.join(" ")}"` : args;
         return new Promise((resolve, reject) => {
           try {
-            const terminal = pty.spawn(file, commandArgs, { name: "xterm-256color", cols: 200, rows: 50, cwd: home, env: ptyEnv });
+            const terminal = pty.spawn(file, commandArgs, { name: "xterm-256color", cols: 200, rows: 50, cwd: process.cwd(), env: ptyEnv });
             windowsPty = terminal;
             // Provider output may contain secrets: forward it to the parser only, never log it.
             terminal.onData(onData);
-            terminal.onExit(({ exitCode }) => resolve({ exitCode }));
+            terminal.onExit(({ exitCode }) => { windowsPtyExited = true; resolve({ exitCode }); });
           } catch {
             state.error = WINDOWS_PTY_UNAVAILABLE;
             reject(new Error("Browser login terminal unavailable"));
@@ -159,8 +160,8 @@ export function startLocalBrowserLogin(provider: "anthropic" | "openai" | "googl
       });
     },
     write(input: string) { if (windowsPty) windowsPty.write(input); else child?.stdin.write(input); },
-    stop() { try { windowsPty?.kill(); } catch { /* already exited */ } child?.kill("SIGTERM"); },
-    async dispose() { try { windowsPty?.kill(); } catch { /* already exited */ } child?.kill("SIGTERM"); },
+    stop() { try { if (!windowsPtyExited) windowsPty?.kill(); } catch { /* already exited */ } child?.kill("SIGTERM"); },
+    async dispose() { try { if (!windowsPtyExited) windowsPty?.kill(); } catch { /* already exited */ } child?.kill("SIGTERM"); },
     async readFile(file: string) { const { readLocalAiCredentialFile } = await import("./local-ai-credential-file.js"); return Buffer.from(await readLocalAiCredentialFile(file)); },
   };
   if (provider === "anthropic") {

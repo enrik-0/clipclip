@@ -75,7 +75,11 @@ describe("local browser subscription login on Windows", () => {
     const [file, args, options] = ptyMock.spawn.mock.calls[0]!;
     expect(file).toBe("C:\\tools\\claude.exe");
     expect(args).toEqual(["setup-token"]);
-    expect(options.cwd).toBe(home);
+    // Ambient cwd, as on Linux/macOS. On Windows a running process (or the console
+    // host that outlives it) keeps its cwd locked, so using the attempt directory
+    // made removing it fail with EBUSY.
+    expect(options.cwd).toBe(process.cwd());
+    expect(options.cwd).not.toBe(home);
     expect(options.env.CLAUDE_CONFIG_DIR).toBe(home);
     expect(options.env.ANTHROPIC_API_KEY).toBe("");
     login.submitCode?.("fixture-code");
@@ -85,6 +89,9 @@ describe("local browser subscription login on Windows", () => {
     // The same read the sign-in card's status check uses must accept that file;
     // when it threw, the card stayed on the code field with no error.
     await expect(readVerifiedLocalAiCredential("anthropic", home)).resolves.toMatch(/^sk-ant-oat01-/);
+    // The terminal already exited: killing it again makes node-pty spawn its console
+    // list helper, which fails with "AttachConsole failed" and floods the log.
+    expect(ptyMock.spawn.mock.results[0]!.value.kill).not.toHaveBeenCalled();
   });
 
   it("surfaces the Codex device link and code through ConPTY", async () => {
