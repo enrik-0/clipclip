@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, Menu, Tray, nativeImage, shell } from "electron";
 import { resolveDesktopConfig } from "./config.mjs";
+import { handleLaunch, secondInstanceAction } from "./launch.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
 import { statusPageUrl } from "./status-page.mjs";
 
@@ -10,7 +11,6 @@ const srcDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.join(srcDir, "..");
 const LOG_TAIL_CHARS = 6000;
 const LOG_ROTATE_BYTES = 5 * 1024 * 1024;
-const startHidden = process.argv.includes("--hidden");
 
 app.setName("Paperclip Desktop");
 if (process.platform === "win32") app.setAppUserModelId("ai.paperclip.desktop");
@@ -218,13 +218,11 @@ async function restartServer() {
   await startServer();
 }
 
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
-} else {
+function startApp({ hidden }) {
   // Launching the app again focuses the running one; `--quit` asks it to shut
   // down instead, which gives scripts a way to stop the server cleanly.
   app.on("second-instance", (_event, argv) => {
-    if (argv.includes("--quit")) app.quit();
+    if (secondInstanceAction(argv) === "quit") app.quit();
     else showWindow();
   });
 
@@ -253,10 +251,20 @@ if (!app.requestSingleInstanceLock()) {
   // finished loading, so awaiting it here would never resolve.
   void app.whenReady().then(async () => {
     const logFile = openLogStream();
-    appendLog(`[desktop] repo ${config.repoRoot}, mode ${config.serverMode ?? "none"}, log ${logFile}\n`);
+    appendLog(`[desktop] repo ${config.repoRoot}, mode ${config.serverMode ?? "none"}, log ${logFile}
+`);
     createTray();
     createWindow();
-    if (!startHidden) showWindow();
+    if (!hidden) showWindow();
     await startServer();
   });
 }
+
+handleLaunch({
+  argv: process.argv,
+  requestLock: () => app.requestSingleInstanceLock(),
+  quit: () => app.quit(),
+  exit: (code) => app.exit(code),
+  start: startApp,
+  log: (text) => process.stderr.write(text),
+});
