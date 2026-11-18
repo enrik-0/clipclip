@@ -12,6 +12,7 @@ import { resolvePaperclipEnvPath } from "./paths.js";
 import { maybeRepairLegacyWorktreeConfigAndEnvFiles } from "./worktree-config.js";
 import { shouldLoadWorkingDirectoryEnv } from "./env-file-policy.js";
 import { applyEmptyWorktreeSigningSecrets } from "./dev-runner-worktree.js";
+import { ensureLocalTrustedAgentJwtSecret } from "./local-agent-jwt-secret.js";
 import {
   AUTH_BASE_URL_MODES,
   BIND_MODES,
@@ -56,6 +57,21 @@ if (!isCloudManagedInstance()) {
     applyEmptyWorktreeSigningSecrets(dirname(dirname(PAPERCLIP_ENV_FILE_PATH)));
   }
   maybeRepairLegacyWorktreeConfigAndEnvFiles();
+
+  const agentJwtSecret = ensureLocalTrustedAgentJwtSecret({
+    env: process.env,
+    envFilePath: PAPERCLIP_ENV_FILE_PATH,
+    deploymentMode: resolveDeploymentMode(),
+  });
+  if (agentJwtSecret.status === "created") {
+    process.stderr.write(`[paperclip] Created PAPERCLIP_AGENT_JWT_SECRET in ${agentJwtSecret.envFilePath}\n`);
+  } else if (agentJwtSecret.status === "unsaved") {
+    process.stderr.write(
+      `[paperclip] Could not save PAPERCLIP_AGENT_JWT_SECRET to ${agentJwtSecret.envFilePath} ` +
+        `(${agentJwtSecret.error instanceof Error ? agentJwtSecret.error.message : String(agentJwtSecret.error)}); ` +
+        "agent runs use a secret for this process only\n",
+    );
+  }
 }
 
 const TAILSCALE_DETECT_TIMEOUT_MS = 3000;

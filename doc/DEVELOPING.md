@@ -460,6 +460,14 @@ This starts:
 - API server: `http://localhost:3100`
 - UI: served by the API server in dev middleware mode (same origin as API)
 
+Agent runs need `PAPERCLIP_AGENT_JWT_SECRET` to receive their own
+`PAPERCLIP_API_KEY`. In `local_trusted` mode, when neither that variable nor
+`BETTER_AUTH_SECRET` is set, the server creates the secret on its first start and
+saves it in the instance `.env` next to `config.json` (the file `paperclipai
+onboard` writes). Later starts reuse it. Without a secret, agent requests would
+carry no bearer and would count as the board user. Other deployment modes still
+require an explicit secret.
+
 `pnpm dev` runs the server in watch mode and restarts on changes from workspace packages (including adapter packages). Use `pnpm dev:once` to run without file watching.
 
 `pnpm dev:once` auto-applies pending local migrations by default before starting the dev server.
