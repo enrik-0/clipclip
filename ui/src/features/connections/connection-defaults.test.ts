@@ -46,6 +46,14 @@ describe("askFirstCatalogEntryIdsFor", () => {
       askFirstCatalogEntryIdsFor({ ...result, suggestedDefaults: { askFirstRiskLevels: "write" } }, () => true),
     ).toEqual([]);
   });
+
+  it("gates nothing rather than throwing when the result has no action list", () => {
+    // Gateway setups such as Arcade and Composio can finish without one.
+    expect(askFirstCatalogEntryIdsFor({ suggestedDefaults: {} } as never, () => true)).toEqual([]);
+    expect(
+      askFirstCatalogEntryIdsFor({ actions: {}, suggestedDefaults: result.suggestedDefaults } as never, () => true),
+    ).toEqual([]);
+  });
 });
 
 describe("askFirstCatalogEntryIdsFor with named actions (#11)", () => {

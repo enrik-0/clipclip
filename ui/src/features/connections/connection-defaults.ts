@@ -24,7 +24,8 @@ export function askFirstCatalogEntryIdsFor(
 ): string[] {
   // Risk levels gate whole tiers; `askFirstActions` names single actions, such
   // as Obsidian patch_note, with a reason the permissions step shows.
-  return result.actions.canMakeChanges
+  // Gateway setups (Arcade, Composio) can finish without an action list.
+  return (result.actions?.canMakeChanges ?? [])
     .filter((action) => isEnabled(action.catalogEntryId) && isSuggestedAskFirstAction(result.suggestedDefaults, action))
     .map((action) => action.catalogEntryId);
 }
