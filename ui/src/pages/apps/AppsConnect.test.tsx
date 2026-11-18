@@ -438,6 +438,49 @@ describe("AppsConnect — Connect with a link (M4 frame)", () => {
     return root;
   }
 
+  describe("Obsidian vault setup", () => {
+    const OBSIDIAN = CONNECTABLE_APP_DEFINITIONS.find((app) => app.slug === "obsidian")!;
+
+    async function renderObsidian() {
+      listGalleryMock.mockResolvedValue({ apps: [OBSIDIAN] });
+      await render(undefined, false, <ConnectionSetupFlow serviceSlug="obsidian" />);
+    }
+
+    async function connectVault(vaultPath: string) {
+      const folder = container.querySelector<HTMLInputElement>('input[aria-label="Vault folder"]');
+      expect(folder).not.toBeNull();
+      await act(async () => setInputValue(folder!, vaultPath));
+      await act(async () => buttonByText("Connect")?.click());
+      await flushReact();
+    }
+
+    it("shows the server message of a 422 setup error, not the outage copy", async () => {
+      const message = "Paperclip cannot find that folder on the computer that runs it. Check the path of the vault.";
+      connectAppMock.mockRejectedValueOnce(new ApiError(message, 422, {
+        error: message,
+        details: { code: "obsidian_vault_path_not_found" },
+      }));
+      await renderObsidian();
+      await connectVault("C:\\no\\such\\vault");
+
+      const alert = container.querySelector('[role="alert"]');
+      expect(alert?.textContent).toContain(message);
+      expect(container.textContent).not.toContain("temporarily unavailable");
+    });
+
+    it("keeps the outage copy for a genuine 502", async () => {
+      connectAppMock.mockRejectedValueOnce(new ApiError("Remote MCP server returned HTTP 503", 502, {
+        error: "Remote MCP server returned HTTP 503",
+        details: { code: "paperclip_error" },
+      }));
+      await renderObsidian();
+      await connectVault("C:\\Vaults\\Notes");
+
+      expect(container.querySelector('[role="alert"]')?.textContent)
+        .toContain("Paperclip is temporarily unavailable. Please try again in a moment.");
+    });
+  });
+
   it("connects 1Password using only its service-account token and links official creation instructions", async () => {
     const app = CONNECTABLE_APP_DEFINITIONS.find(entry => entry.slug === "1password")!;
     listGalleryMock.mockResolvedValue({ apps: [app] });
