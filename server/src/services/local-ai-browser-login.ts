@@ -48,7 +48,9 @@ sys.exit(os.waitstatus_to_exitcode(status))
 
 const WINDOWS_PTY_UNAVAILABLE = "Browser sign-in on Windows requires the optional ConPTY dependency (@lydell/node-pty). Reinstall Paperclip's dependencies, then start sign-in again.";
 const WINDOWS_GOOGLE_UNSUPPORTED = "Google sign-in is not supported on Windows hosts. Run Paperclip on Linux, macOS or WSL, or use a sandbox environment.";
-const NO_LINK_PRODUCED = "Sign-in ended before a link was produced. Make sure the provider CLI is installed and working on this host, then start sign-in again.";
+const CLAUDE_CODE_NOT_ACCEPTED = "Claude did not accept the code (it may be incomplete, expired or already used). Start sign-in again and paste the new code.";
+const CLAUDE_TOKEN_NOT_READ = "Claude finished signing in, but Paperclip could not read the token from its screen. The installed Claude CLI may have changed its output; update Paperclip or report this, then start sign-in again.";
+const NO_LINK_PRODUCED ="Sign-in ended before a link was produced. Make sure the provider CLI is installed and working on this host, then start sign-in again.";
 
 // Minimal view of the pieces of the optional node-pty module that are used.
 type WindowsPty = {
@@ -167,6 +169,13 @@ export function startLocalBrowserLogin(provider: "anthropic" | "openai" | "googl
     state.submitCode = (code) => { deliverCode?.(code); deliverCode = undefined; };
     void runSetupTokenLogin(driver, {
       timeoutMs: 300_000, signal: controller.signal,
+      // The runner logs only fixed, non-secret sentences. Turn the two that end a
+      // sign-in after the link was shown into an actionable reason for the card.
+      log: (line) => {
+        if (!state.authorizationUrl) return;
+        if (line.includes("ended with a non-zero exit code")) state.error ??= CLAUDE_CODE_NOT_ACCEPTED;
+        else if (line.includes("the credential did not land")) state.error ??= CLAUDE_TOKEN_NOT_READ;
+      },
       onPrompt: (prompt) => { state.authorizationUrl = prompt.url; },
       provideCode: (signal) => new Promise<string>((resolve, reject) => {
         const abort = () => reject(new Error("Local sign-in cancelled"));

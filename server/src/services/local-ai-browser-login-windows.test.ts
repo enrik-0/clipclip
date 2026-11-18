@@ -126,6 +126,39 @@ describe("local browser subscription login on Windows", () => {
     expect(JSON.stringify(login)).not.toContain("private");
   });
 
+  describe("a sign-in that ends after the link was shown", () => {
+    const afterLink = (onReturn: (exit: (code: number) => void, emit: (data: string) => void) => void) => {
+      ptyMock.spawn.mockImplementation(() => fakeTerminal({
+        lines: [
+          "Browser didn't open? Use the URL below to sign in (c to copy)\r\n",
+          `${CLAUDE_URL}\r\n`,
+          "Paste code here if prompted >\r\n",
+        ],
+        onWrite: (input, emit, exit) => { if (input === "\r") onReturn(exit, emit); },
+      }));
+    };
+    const submit = async () => {
+      const login = startLocalBrowserLogin("anthropic", home);
+      await vi.waitFor(() => expect(login.authorizationUrl).toBe(CLAUDE_URL), { timeout: 5000 });
+      login.submitCode?.("fixture-code");
+      await vi.waitFor(() => expect(login.outcome).toBe("failure"), { timeout: 5000 });
+      return login;
+    };
+
+    it("says the token screen was not recognised when the CLI finishes cleanly without a readable token", async () => {
+      afterLink((exit, emit) => { emit("Something the parser does not know\r\n"); exit(0); });
+      const login = await submit();
+      expect(login.error).toMatch(/could not read the token/i);
+      expect(JSON.stringify(login)).not.toContain("does not know");
+    });
+
+    it("says the code was not accepted when the CLI exits with an error after the code", async () => {
+      afterLink((exit) => exit(1));
+      const login = await submit();
+      expect(login.error).toMatch(/did not accept the code/i);
+    });
+  });
+
   it("reports a clear error when the CLI exits without producing a link", async () => {
     ptyMock.spawn.mockImplementation(() => fakeTerminal({ lines: ["private-provider-output\r\n"], exitAfterLines: 1 }));
     const login = startLocalBrowserLogin("anthropic", home);

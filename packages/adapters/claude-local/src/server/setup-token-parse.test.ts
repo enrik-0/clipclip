@@ -550,6 +550,44 @@ function successScreen(body: string[]): string {
 }
 
 describe("parseSetupTokenCredential", () => {
+  describe("Claude Code 2.1.326 success screen", () => {
+    // The 2.1.326 UI paints each row at an absolute cursor position (CUP), spaces
+    // words with cursor-forward sequences, and computes the token lifetime in the
+    // anchor line from the expiry timestamp instead of printing a fixed
+    // "1 year". The token and the lines around it are synthetic.
+    const ESC = "\x1b";
+    const words = (text: string) => text.split(" ").join(`${ESC}[1C`);
+    const paintedScreen = (lifetime: string, token = FULL_TOKEN) => [
+      `${ESC}[2;1H${ESC}[32m✓${ESC}[m ${words("Long-lived authentication token created successfully!")}`,
+      `${ESC}[4;1H${words(`Your OAuth token (valid for ${lifetime}):`)}`,
+      `${ESC}[6;1H${ESC}[33m${token}${ESC}[m`,
+      `${ESC}[8;1H${ESC}[2m${words(SETUP_TOKEN_AFTER_ANCHOR)}${ESC}[m`,
+      `${ESC}[10;1H${words("Use this token by setting: export CLAUDE_CODE_OAUTH_TOKEN=<token>")}`,
+    ].join("");
+
+    it.each(["1 year", "365 days", "12 months", "11 months, 30 days", "31535999 seconds"])(
+      "binds the token when the screen is painted with cursor positioning and says 'valid for %s'",
+      (lifetime) => {
+        expect(parseSetupTokenCredential(paintedScreen(lifetime))).toBe(FULL_TOKEN);
+      },
+    );
+
+    it("binds a token wrapped across two painted rows", () => {
+      const text = paintedScreen("1 year", `${TOKEN_FRAGMENT_A}${ESC}[7;1H${TOKEN_FRAGMENT_B}`);
+      expect(parseSetupTokenCredential(text)).toBe(FULL_TOKEN);
+    });
+
+    it("rejects a lifetime field that smuggles extra text into the anchor line", () => {
+      expect(parseSetupTokenCredential(paintedScreen("1 year) and more text ("))).toBeNull();
+      expect(parseSetupTokenCredential(paintedScreen(`1 year${"x".repeat(80)}`))).toBeNull();
+    });
+
+    it("still rejects a token printed outside the two anchors", () => {
+      const text = `${ESC}[2;1H${FULL_TOKEN}${ESC}[4;1H${words("Something else entirely")}`;
+      expect(parseSetupTokenCredential(text)).toBeNull();
+    });
+  });
+
   it("returns the de-wrapped token from the exact success record once", () => {
     const text = successScreen([TOKEN_FRAGMENT_A, TOKEN_FRAGMENT_B]);
     expect(parseSetupTokenCredential(text)).toBe(FULL_TOKEN);
