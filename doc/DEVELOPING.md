@@ -130,6 +130,22 @@ Current implementation status:
 - Node.js 24.11+
 - pnpm 9+
 
+### Package scripts on Windows
+
+pnpm runs `package.json` scripts with `cmd.exe` on Windows. You do not need to set
+`npm_config_script_shell`. Scripts must not use POSIX-only commands such as `rm -rf`,
+`mkdir -p`, `cp`, `mv`, `chmod`, `[ -f ]`, unquoted globs, or `NAME=value command`.
+Use these portable forms instead:
+
+- `node scripts/fsx.mjs rm|mkdir|cp|mv|chmod|prune ...` for file operations. Put a
+  glob in double quotes, for example `cp "src/migrations/*.sql" dist/migrations/`.
+- `node scripts/run-bash.mjs <script.sh> [args...]` for a bash script. On Windows it
+  finds Git Bash, not the WSL launcher. Set `PAPERCLIP_BASH` to choose a bash.
+- `cross-env NAME=value <command>` for environment variables.
+
+`scripts/__tests__/package-scripts-portable.test.mjs` fails when a script uses a
+POSIX-only form.
+
 ## Dependency Lockfile Policy
 
 GitHub Actions owns every managed pnpm lockfile:
