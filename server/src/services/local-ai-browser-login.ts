@@ -100,10 +100,23 @@ export function startLocalBrowserLogin(provider: "anthropic" | "openai" | "googl
       if (provider === "openai") {
         const legacyPlatform = !((process.platform === "linux" || process.platform === "darwin")
           && (process.arch === "x64" || process.arch === "arm64"));
+        const codexOnPath = async () => {
+          await ensureCommandResolvable("codex", home, process.env);
+          return path.resolve(home, await resolveCommandForLogs("codex", home, process.env));
+        };
         try {
-          if (legacyPlatform) {
-            await ensureCommandResolvable("codex", home, process.env);
-            executable = path.resolve(home, await resolveCommandForLogs("codex", home, process.env));
+          if (windows) {
+            // Prefer the Codex that ships with Paperclip (@openai/codex); fall back to
+            // one on PATH. Its launcher is a .js file, which is started through node.
+            try {
+              const shipped = resolveCodexCommand();
+              if (typeof shipped !== "string" || !shipped) throw new Error("no shipped Codex");
+              executable = shipped;
+            } catch {
+              executable = await codexOnPath();
+            }
+          } else if (legacyPlatform) {
+            executable = await codexOnPath();
           } else {
             executable = resolveCodexCommand();
           }
@@ -132,8 +145,10 @@ export function startLocalBrowserLogin(provider: "anthropic" | "openai" | "googl
         for (const [key, value] of Object.entries(env)) if (typeof value === "string") ptyEnv[key] = value;
         // ConPTY cannot execute .cmd/.bat shims (npm installs) directly; run them through cmd.exe.
         const shim = /\.(cmd|bat)$/i.test(executable);
-        const file = shim ? (process.env.ComSpec ?? "cmd.exe") : executable;
-        const commandArgs: string[] | string = shim ? `/d /s /c ""${executable}" ${args.join(" ")}"` : args;
+        // A JavaScript launcher (the shipped Codex) is not an executable either: run it with node.
+        const script = /\.(c|m)?js$/i.test(executable);
+        const file = shim ? (process.env.ComSpec ?? "cmd.exe") : script ? process.execPath : executable;
+        const commandArgs: string[] | string = shim ? `/d /s /c ""${executable}" ${args.join(" ")}"` : script ? [executable, ...args] : args;
         return new Promise((resolve, reject) => {
           try {
             const terminal = pty.spawn(file, commandArgs, { name: "xterm-256color", cols: 200, rows: 50, cwd: process.cwd(), env: ptyEnv });

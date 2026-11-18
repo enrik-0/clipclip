@@ -109,6 +109,42 @@ describe("local browser subscription login on Windows", () => {
     expect(childProcessMock.spawn).not.toHaveBeenCalled();
   });
 
+  describe("which Codex runs on a Windows host", () => {
+    const deviceLogin = () => ptyMock.spawn.mockImplementation(() => fakeTerminal({
+      lines: ["https://auth.openai.com/codex/device\r\n2. Enter this one-time code\r\nABCD-EFGHJ\r\n"],
+      exitAfterLines: 0,
+    }));
+
+    it("uses the Codex that ships with Paperclip, through node, without needing one on PATH", async () => {
+      const launcher = "C:\\app\\node_modules\\@openai\\codex\\bin\\codex.js";
+      runnerMock.resolveCodexCommand.mockReturnValue(launcher);
+      deviceLogin();
+      const login = startLocalBrowserLogin("openai", home);
+      await vi.waitFor(() => expect(login.outcome).toBe("success"), { timeout: 5000 });
+      const [file, args] = ptyMock.spawn.mock.calls[0]!;
+      expect(file).toBe(process.execPath); // a .js launcher cannot be executed by ConPTY directly
+      expect(args).toEqual([launcher, "login", "--device-auth"]);
+      expect(resolverMock.ensureCommandResolvable).not.toHaveBeenCalled();
+    });
+
+    it("falls back to a Codex on PATH when the shipped one is unavailable", async () => {
+      runnerMock.resolveCodexCommand.mockImplementation(() => { throw new Error("no shipped codex"); });
+      deviceLogin();
+      const login = startLocalBrowserLogin("openai", home);
+      await vi.waitFor(() => expect(login.outcome).toBe("success"), { timeout: 5000 });
+      expect(ptyMock.spawn.mock.calls[0]![0]).toBe("C:\\tools\\codex.exe");
+    });
+
+    it("explains the missing Codex when neither is available", async () => {
+      runnerMock.resolveCodexCommand.mockImplementation(() => { throw new Error("no shipped codex"); });
+      resolverMock.ensureCommandResolvable.mockRejectedValueOnce(new Error("not on PATH"));
+      const login = startLocalBrowserLogin("openai", home);
+      await vi.waitFor(() => expect(login.outcome).toBe("failure"), { timeout: 5000 });
+      expect(login.error).toMatch(/requires the Codex CLI.*Install Codex/);
+      expect(ptyMock.spawn).not.toHaveBeenCalled();
+    });
+  });
+
   it("runs npm .cmd shims through cmd.exe because ConPTY cannot execute them directly", async () => {
     resolverMock.resolveCommandForLogs.mockResolvedValue("C:\\Users\\me\\AppData\\Roaming\\npm\\claude.cmd");
     ptyMock.spawn.mockImplementation(() => fakeTerminal({ lines: [], exitAfterLines: 1 }));
