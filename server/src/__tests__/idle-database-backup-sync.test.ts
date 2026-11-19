@@ -20,28 +20,32 @@ vi.mock("node:fs/promises", async importOriginal => {
     return handle;
   } };
 });
+// Windows cannot flush a directory handle, so the service syncs directory
+// entries only on POSIX systems.
+const directorySyncs = process.platform === "win32" ? [] : ["directory"];
 let directory: string;
 beforeEach(async () => { directory = await mkdtemp(path.join(os.tmpdir(), "backup-sync-")); syncs.events = []; syncs.fail = ""; });
 afterEach(async () => { await rm(directory, { recursive: true, force: true }); });
 describe("idle checkpoint persistence barriers", () => {
   it("syncs the marker, archive and directory entries before reporting completion", async () => {
     await markIdleBackupWakeRequired(directory);
-    expect(syncs.events).toEqual([".idle-backup-wake-required", "directory"]);
+    expect(syncs.events).toEqual([".idle-backup-wake-required", ...directorySyncs]);
     const archive = path.join(directory, "checkpoint.sql.gz"); await writeFile(archive, gzipSync("SELECT 1;"));
     await verifyIdleDatabaseBackup(archive);
-    expect(syncs.events.slice(-2)).toEqual(["checkpoint.sql.gz", "directory"]);
+    expect(syncs.events.slice(-1 - directorySyncs.length)).toEqual(["checkpoint.sql.gz", ...directorySyncs]);
+    const eventsBeforeClear = syncs.events.length;
     await clearIdleBackupWakeRequired(directory);
-    expect(syncs.events.at(-1)).toBe("directory");
+    expect(syncs.events.slice(eventsBeforeClear)).toEqual(directorySyncs);
     await expect(readFile(idleBackupWakeMarker(directory))).rejects.toMatchObject({ code: "ENOENT" });
   });
-  it.each(["checkpoint.sql.gz", "directory"])("rejects %s fsync failure and retains the wake obligation", async boundary => {
+  it.each(["checkpoint.sql.gz", ...directorySyncs])("rejects %s fsync failure and retains the wake obligation", async boundary => {
     await markIdleBackupWakeRequired(directory);
     const archive = path.join(directory, "checkpoint.sql.gz"); await writeFile(archive, gzipSync("SELECT 1;"));
     syncs.fail = boundary;
     await expect(verifyIdleDatabaseBackup(archive)).rejects.toThrow(`injected ${boundary} fsync failure`);
     expect(await readFile(idleBackupWakeMarker(directory), "utf8")).toContain("restarts");
   });
-  it.each([".idle-backup-wake-required", "directory"])("rejects marker %s fsync failure", async boundary => {
+  it.each([".idle-backup-wake-required", ...directorySyncs])("rejects marker %s fsync failure", async boundary => {
     syncs.fail = boundary;
     await expect(markIdleBackupWakeRequired(directory)).rejects.toThrow(`injected ${boundary} fsync failure`);
   });
