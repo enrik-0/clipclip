@@ -91,7 +91,17 @@ describe("Cloud configuration file boundary", () => {
     fs.rmSync(configPath);
     const target = path.join(home, "target.json");
     fs.writeFileSync(target, JSON.stringify(legacyConfig()));
-    fs.symlinkSync(target, configPath);
+    try {
+      fs.symlinkSync(target, configPath, "file");
+    } catch (error) {
+      // Windows only lets privileged users or Developer Mode create file
+      // symbolic links. A directory junction needs no privilege and is still
+      // a link that the reader must refuse.
+      if (process.platform !== "win32" || (error as NodeJS.ErrnoException).code !== "EPERM") throw error;
+      const targetDirectory = path.join(home, "target-directory");
+      fs.mkdirSync(targetDirectory);
+      fs.symlinkSync(targetDirectory, configPath, "junction");
+    }
     await expect(readLegacyCloudRuntimeConfig()).rejects.toThrow(/safely/);
   });
 
