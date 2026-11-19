@@ -1114,6 +1114,7 @@ export function attentionService(db: Db, serviceOptions: AttentionServiceOptions
             requestedByAgentId: approvals.requestedByAgentId,
             requestedByUserId: approvals.requestedByUserId,
             payload: summaryOnly ? sql<Record<string, unknown>>`'{}'::jsonb` : approvals.payload,
+            payloadSource: sql<string | null>`${approvals.payload}->>'source'`,
             createdAt: approvals.createdAt,
             updatedAt: approvals.updatedAt,
           })
@@ -1133,6 +1134,9 @@ export function attentionService(db: Db, serviceOptions: AttentionServiceOptions
           if (linkedIssueId && !readableApprovalIssues.has(linkedIssueId)) continue;
           const dedupKey = `approval:${approval.id}`;
           const title = approvalTitle(approval.type, approval.payload);
+          // A tool action cannot be revised in place: the tool gateway declines it
+          // and sends the note to the agent, so the verb says what will happen.
+          const decidesToolAction = approval.payloadSource === "tool_gateway";
           add(createItem({
             companyId,
             sourceKind: "approval",
@@ -1149,13 +1153,20 @@ export function attentionService(db: Db, serviceOptions: AttentionServiceOptions
                 requestedByAgentId: approval.requestedByAgentId,
                 requestedByUserId: approval.requestedByUserId,
                 issueId: approval.linkedIssueId ?? null,
+                ...(decidesToolAction ? { decidesToolAction: true } : {}),
               },
             },
             whyNow: "Approval is pending a board decision.",
             decisionVerbs: decisionVerbs(
               { id: "approve", label: "Approve", description: "Approve the request." },
               { id: "reject", label: "Reject", description: "Reject the request." },
-              { id: "request_revision", label: "Request revision", description: "Send the request back for changes." },
+              decidesToolAction
+                ? {
+                    id: "request_revision",
+                    label: "Request changes",
+                    description: "Decline this action and send your note to the agent so it can try another way.",
+                  }
+                : { id: "request_revision", label: "Request revision", description: "Send the request back for changes." },
             ),
             inlineResolvable: approval.type !== "request_board_approval",
             entryRule: "approvals.status = 'pending'",

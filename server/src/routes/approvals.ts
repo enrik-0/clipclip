@@ -24,7 +24,11 @@ import type { PluginWorkerManager } from "../services/plugin-worker-manager.js";
 import { issueService } from "../services/issues.js";
 import { approvalReadSqlCondition, canActorReadApproval } from "../services/authorization.js";
 import { REVIEW_PATH_RECOVERY_INSTRUCTION } from "../services/recovery/review-path-recovery.js";
-import { findApprovalDecisionHandler, type ApprovalDecisionHandler } from "../services/approval-decision-handlers.js";
+import {
+  findApprovalDecisionHandler,
+  type ApprovalDecision,
+  type ApprovalDecisionHandler,
+} from "../services/approval-decision-handlers.js";
 
 function redactApprovalPayload<T extends { payload: Record<string, unknown> }>(approval: T): T {
   return {
@@ -302,7 +306,7 @@ export function approvalRoutes(
   // tells the requester. Returns null when no module owns this approval.
   async function decideWithOwner(
     existing: NonNullable<Awaited<ReturnType<typeof svc.getById>>>,
-    decision: "approved" | "rejected",
+    decision: ApprovalDecision,
     decidedByUserId: string,
     decisionNote: string | null | undefined,
   ) {
@@ -481,11 +485,17 @@ export function approvalRoutes(
     async (req, res) => {
       assertBoard(req);
       const id = req.params.id as string;
-      if (!(await requireApprovalAccess(req, id))) {
+      const existing = await requireApprovalAccess(req, id);
+      if (!existing) {
         res.status(404).json({ error: "Approval not found" });
         return;
       }
       const decidedByUserId = req.actor.userId ?? "board";
+      const ownerDecision = await decideWithOwner(existing, "revision_requested", decidedByUserId, req.body.decisionNote);
+      if (ownerDecision) {
+        res.json(redactApprovalPayload(ownerDecision));
+        return;
+      }
       const approval = await svc.requestRevision(id, decidedByUserId, req.body.decisionNote);
 
       await logActivity(db, {

@@ -151,6 +151,9 @@ export function ApprovalDetail() {
   const linkedAgentId = typeof payload.agentId === "string" ? payload.agentId : null;
   const isActionable = approval.status === "pending" || approval.status === "revision_requested";
   const isBudgetApproval = approval.type === "budget_override_required";
+  // The tool gateway declines a tool action on a revision request: the agent
+  // cannot revise a tool call in place, so it gets the reason and tries another way.
+  const decidesToolAction = payload.source === "tool_gateway";
   const TypeIcon = typeIcon[approval.type] ?? defaultTypeIcon;
   const showApprovedBanner = searchParams.get("resolved") === "approved" && approval.status === "approved";
   const primaryLinkedIssue = linkedIssues?.[0] ?? null;
@@ -263,6 +266,12 @@ export function ApprovalDetail() {
             </p>
           </div>
         )}
+        {decidesToolAction && approval.status === "pending" && (
+          <p className="text-xs text-muted-foreground">
+            This approval decides a tool action. Approve runs it once. Reject and Request changes decline it, so it
+            does not run, and the agent is told so it can try another way.
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           {isActionable && !isBudgetApproval && (
             <>
@@ -295,8 +304,9 @@ export function ApprovalDetail() {
               variant="outline"
               onClick={() => revisionMutation.mutate()}
               disabled={revisionMutation.isPending}
+              title={decidesToolAction ? "Decline this action and tell the agent to try another way." : undefined}
             >
-              Request revision
+              {decidesToolAction ? "Request changes" : "Request revision"}
             </Button>
           )}
           {approval.status === "revision_requested" && (

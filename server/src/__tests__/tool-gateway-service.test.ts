@@ -52,7 +52,7 @@ import { commitToolActionReview } from "../services/tool-action-review.js";
 import { bindVerifiedToolApprovalArguments, claimToolTestApproval, releaseToolApproval, startToolInvocation } from "../services/tool-approval-execution.js";
 import { materializeNativeInteractionResponses } from "../services/native-runtime/native-interaction-bridge.js";
 import { toolActionDeliveryService } from "../services/tool-action-delivery.js";
-import { toolActionApprovalDecisionHandler } from "../services/tool-action-formal-approval.js";
+import { TOOL_ACTION_REVISION_DEFAULT_REASON, toolActionApprovalDecisionHandler } from "../services/tool-action-formal-approval.js";
 import { secretService } from "../services/secrets.js";
 import { toolAccessService } from "../services/tool-access.js";
 import {
@@ -3166,6 +3166,59 @@ describeEmbeddedPostgres("tool gateway service", () => {
         companyId: fixture.company.id, actionRequestId: request!.id, actor: { userId: "board-user" },
       })).rejects.toMatchObject({ status: 409 });
       expect(fixture.executeSpy).not.toHaveBeenCalled();
+    });
+
+    it("requesting a revision in the Inbox declines the action with the note and tells the agent (#24)", async () => {
+      const fixture = await destructiveRequestFixture();
+      expect(fixture.handler.handles(fixture.approval)).toBe(true);
+
+      await fixture.handler.decide({
+        approval: fixture.approval, decision: "revision_requested", decidedByUserId: "board-user",
+        decisionNote: "Archive the note instead",
+      });
+      // A repeat request does not decide the action again.
+      await fixture.handler.decide({
+        approval: fixture.approval, decision: "revision_requested", decidedByUserId: "board-user",
+        decisionNote: "Archive the note instead",
+      });
+
+      expect(fixture.executeSpy).not.toHaveBeenCalled();
+      const [request] = await db.select().from(toolActionRequests);
+      expect(request).toMatchObject({ status: "rejected", decidedByUserId: "board-user" });
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval).toMatchObject({ status: "rejected", decidedByUserId: "board-user", decisionNote: "Archive the note instead" });
+      const [interaction] = await db.select().from(issueThreadInteractions).where(eq(issueThreadInteractions.id, request!.interactionId!));
+      expect(interaction).toMatchObject({ status: "rejected", result: { outcome: "rejected", reason: "Archive the note instead" } });
+      const [invocation] = await db.select().from(toolInvocations).where(eq(toolInvocations.id, request!.invocationId));
+      expect(invocation).toMatchObject({ status: "denied", approvalState: "rejected" });
+      const activity = await db.select().from(activityLog).where(eq(activityLog.entityId, fixture.approval.id));
+      expect(activity.filter((row) => row.action === "approval.rejected")).toHaveLength(1);
+
+      await fixture.endRun();
+      expect(fixture.wakeup).toHaveBeenCalledTimes(1);
+      expect(fixture.wakeup.mock.calls[0]![1].payload.toolAction).toMatchObject({
+        executionStatus: "rejected",
+        declineReason: "Archive the note instead",
+      });
+      await expect(fixture.gateway.approveActionRequest({
+        companyId: fixture.company.id, actionRequestId: request!.id, actor: { userId: "board-user" },
+      })).rejects.toMatchObject({ status: 409 });
+      expect(fixture.executeSpy).not.toHaveBeenCalled();
+    });
+
+    it("requesting a revision without a note declines the action with the default reason (#24)", async () => {
+      const fixture = await destructiveRequestFixture();
+
+      await fixture.handler.decide({ approval: fixture.approval, decision: "revision_requested", decidedByUserId: "board-user" });
+
+      expect(fixture.executeSpy).not.toHaveBeenCalled();
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval).toMatchObject({ status: "rejected", decisionNote: TOOL_ACTION_REVISION_DEFAULT_REASON });
+      await fixture.endRun();
+      expect(fixture.wakeup.mock.calls[0]![1].payload.toolAction).toMatchObject({
+        executionStatus: "rejected",
+        declineReason: TOOL_ACTION_REVISION_DEFAULT_REASON,
+      });
     });
 
     it("declining on the task card also rejects the formal approval", async () => {

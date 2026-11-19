@@ -21,12 +21,19 @@ type ToolActionDecisions = {
 
 const DEAD_ACTION_STATUSES = new Set(["expired", "cancelled"]);
 
+/** The decline reason the agent gets when the board requests a revision without a note. */
+export const TOOL_ACTION_REVISION_DEFAULT_REASON =
+  "The board requested changes to this action without a note. Do not retry the same call; try another way or ask what to change.";
+
 /**
  * A high-risk tool action has one decision. The formal board approval that the
  * tool gateway creates for it is resolved by the same decision as the task card:
  * approving it in the Inbox approves and runs the action once, and rejecting it
- * declines the action. The tool gateway resolves both records in one review
- * transaction and wakes the agent after the outcome is recorded.
+ * declines the action. The agent cannot revise a tool call in place, so a
+ * revision request also declines the action, with the board note as the
+ * reason (or a default reason when there is no note). The tool gateway resolves
+ * both records in one review transaction and wakes the agent with the reason
+ * after the outcome is recorded.
  */
 export function toolActionApprovalDecisionHandler(
   db: Db,
@@ -74,7 +81,8 @@ export function toolActionApprovalDecisionHandler(
       await decisions.declineActionRequest({
         companyId: approval.companyId,
         actionRequestId: request.id,
-        reason: decisionNote?.trim() || undefined,
+        reason: decisionNote?.trim()
+          || (decision === "revision_requested" ? TOOL_ACTION_REVISION_DEFAULT_REASON : undefined),
         actor,
       });
     },

@@ -565,6 +565,45 @@ describe("AttentionQueueRow", () => {
     expect(container?.textContent).toContain("Approval approved");
   });
 
+  it("says that requesting changes on a tool action approval declines the action (#24)", async () => {
+    vi.mocked(approvalsApi.requestRevision).mockResolvedValue({} as never);
+    render(
+      <AttentionQueueRow
+        item={buildItem({
+          inlineResolvable: false,
+          subject: {
+            kind: "approval",
+            id: "approval-1",
+            companyId: "c1",
+            title: "Run delete_note",
+            identifier: null,
+            status: "pending",
+            href: "/PAP/approvals/approval-1",
+            metadata: { type: "request_board_approval", decidesToolAction: true },
+          },
+          decisionVerbs: [
+            { id: "request_revision", label: "Request changes", description: "Decline this action and send your note to the agent so it can try another way." },
+          ],
+        })}
+        companyId="c1"
+        expanded={false}
+        onToggleExpand={noop}
+        onDismiss={noop}
+      />,
+    );
+
+    const requestChanges = Array.from(container?.querySelectorAll("button") ?? []).find(
+      (button) => button.textContent === "Request changes",
+    );
+    act(() => requestChanges?.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(approvalsApi.requestRevision).toHaveBeenCalledWith("approval-1");
+    expect(container?.textContent).toContain("Changes requested");
+    expect(container?.textContent).toContain("The action was declined and will not run.");
+    expect(container?.textContent).not.toContain("Approval sent for revision");
+  });
+
   it("renders configured confirmation labels and accepts from the compact action area", async () => {
     const onToggleExpand = vi.fn();
     vi.mocked(issuesApi.acceptInteraction).mockResolvedValue({} as never);
