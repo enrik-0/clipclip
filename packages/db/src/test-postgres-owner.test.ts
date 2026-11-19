@@ -103,3 +103,33 @@ describe.skipIf(process.platform === "win32")("test PostgreSQL ownership", () =>
     await expect(f.owner.stopGracefully()).rejects.toThrow("without clean shutdown");
   });
 });
+
+describe("test PostgreSQL immediate shutdown on Windows", () => {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
+  afterEach(() => { Object.defineProperty(process, "platform", platform); });
+
+  it("waits past the postmaster's 5 second kill escalation", async () => {
+    Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+    vi.useFakeTimers();
+    const f = fixture();
+    const stop = f.owner.stop();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(f.child.kill.mock.calls).toEqual([["SIGINT"], ["SIGQUIT"]]);
+    // PostgreSQL on Windows kills busy children 5 seconds after the immediate
+    // request and only then exits.
+    await vi.advanceTimersByTimeAsync(5_200);
+    f.exit();
+    await stop;
+  });
+
+  it("still reports a server that never exits", async () => {
+    Object.defineProperty(process, "platform", { ...platform, value: "win32" });
+    vi.useFakeTimers();
+    const f = fixture();
+    const failure = expect(f.owner.stop()).rejects.toThrow("data directory is retained");
+    await vi.advanceTimersByTimeAsync(20_000);
+    await failure;
+    f.exit();
+    await f.owner.stop();
+  });
+});
