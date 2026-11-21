@@ -5,6 +5,7 @@
   "description": "Windows desktop shell for a local Paperclip instance",
   "license": "MIT",
   "type": "module",
+  "packageManager": "pnpm@10.29.3",
   "main": "src/main.mjs",
   "scripts": {
     "start": "node node_modules/electron/install.js && electron .",
