@@ -25,7 +25,6 @@ jobs:
   windows-installer:
     name: Windows installer
     runs-on: windows-latest
-    timeout-minutes: 90
     permissions:
       contents: write
     env:
