@@ -36,6 +36,17 @@ ELECTRON_BUILDER_COMPRESSION_LEVEL=0 pnpm dist   # PowerShell: $env:ELECTRON_BUI
 
 Los parámetros `-c.compression=...` de la línea de comandos no surten efecto en esta versión de electron-builder.
 
+Para comprobar el instalador de punta a punta (instalación silenciosa, arranque en el puerto 3199 con un home aislado,
+comprobación de `/api/health` y de la UI, y desinstalación):
+
+```sh
+powershell -File scripts/verify-installer.ps1
+```
+
+Windows y el extractor del instalador omiten en silencio los archivos con rutas de más de 260 caracteres, así que
+`pnpm stage` empaqueta en un solo archivo el SDK `@microsoft/teams.graph-endpoints` y falla si alguna ruta del servidor
+supera los 160 caracteres.
+
 `pnpm stage` (lo ejecutan `pack` y `dist`) deja en `stage/server` el servidor compilado con sus dependencias de
 producción y la UI; electron-builder lo copia a `resources/runtime`. La app empaquetada ejecuta el servidor con el propio
 Electron como Node (`ELECTRON_RUN_AS_NODE=1`), así que no necesita Node ni el repositorio. Su archivo de entorno vive en
