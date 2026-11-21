@@ -27,6 +27,15 @@ pnpm pack                   # release/win-unpacked/Paperclip Desktop.exe (sin in
 pnpm dist                   # instalador NSIS en release/
 ```
 
+La configuración usa compresión `maximum` (es la que debe llevar el instalador de distribución, y la que aplica la CI
+en `.github/workflows/desktop-release.yml`). Es muy lenta; para probar en local, compila sin comprimir:
+
+```sh
+ELECTRON_BUILDER_COMPRESSION_LEVEL=0 pnpm dist   # PowerShell: $env:ELECTRON_BUILDER_COMPRESSION_LEVEL=0
+```
+
+Los parámetros `-c.compression=...` de la línea de comandos no surten efecto en esta versión de electron-builder.
+
 `pnpm stage` (lo ejecutan `pack` y `dist`) deja en `stage/server` el servidor compilado con sus dependencias de
 producción y la UI; electron-builder lo copia a `resources/runtime`. La app empaquetada ejecuta el servidor con el propio
 Electron como Node (`ELECTRON_RUN_AS_NODE=1`), así que no necesita Node ni el repositorio. Su archivo de entorno vive en

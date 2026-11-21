@@ -109,16 +109,16 @@ jobs:
         working-directory: desktop
         run: pnpm stage
 
-      # Maximum compression is slow but only runs here, not on developer machines.
+      # Maximum compression comes from "compression" in desktop/package.json. It
+      # is slow, which is why developers build without it (see desktop/README.md).
       - name: Build installer
         shell: bash
         working-directory: desktop
         run: |
-          args=(--win nsis -c.compression=maximum)
           if [ -n "${{ steps.version.outputs.version }}" ]; then
-            args+=("-c.extraMetadata.version=${{ steps.version.outputs.version }}")
+            npm pkg set version="${{ steps.version.outputs.version }}"
           fi
-          pnpm exec electron-builder "${args[@]}" --publish never
+          node node_modules/electron-builder/cli.js --win nsis --publish never
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
