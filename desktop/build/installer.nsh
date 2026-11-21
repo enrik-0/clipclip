@@ -4,3 +4,11 @@
 !macro customHeader
   ShowInstDetails hide
 !macroend
+
+; The bundled runtime contains paths longer than MAX_PATH (260), which NSIS
+; RMDir cannot delete. cmd handles them with the \\?\ prefix.
+!macro customRemoveFiles
+  SetOutPath $TEMP
+  nsExec::Exec 'cmd.exe /c rd /s /q "\\?\$INSTDIR"'
+  Pop $R0
+!macroend
