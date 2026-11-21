@@ -21,7 +21,7 @@
     "extraResources": [{ "from": "stage", "to": "runtime", "filter": ["**/*"] }],
     "asar": true,
     "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "icon": "build/icon.png" },
-    "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true }
+    "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true, "include": "build/installer.nsh" }
   },
   "devDependencies": {
     "electron": "45.3.3",
