@@ -27,3 +27,10 @@ async function main(): Promise<void> {
 }
 
 await main();
+
+// A child process that outlives the embedded database (for example an orphaned
+// worker inheriting its stdio pipes) can keep the event loop alive after every
+// step has finished, which blocks `pnpm dev` and every script waiting on this
+// command. The timer is unref'd: it never delays a normal exit, and the grace
+// period lets buffered output flush before a forced one.
+setTimeout(() => process.exit(0), 3_000).unref();

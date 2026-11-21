@@ -16,6 +16,10 @@ import { startLocalBrowserLogin, type LocalBrowserLoginState } from "./local-ai-
 import { registerIdleLocalWorkProbe } from "./idle-local-work.js";
 
 const LOCAL_LOGIN_METHOD = "local_subscription";
+// On Windows a directory cannot be removed while a process or the console host
+// that is shutting down still holds it (EBUSY/EPERM); retry briefly instead of
+// failing the request with a 500.
+const REMOVE_ATTEMPT_DIRECTORY = { recursive: true, force: true, maxRetries: 8, retryDelay: 250 } as const;
 const ATTEMPT_DURATION_MS = 30 * 60 * 1000;
 const BROWSER_STOP_WAIT_MS = 5_000;
 const RETIREMENT_PENDING = "local_login_retirement_pending";
@@ -177,7 +181,7 @@ export function localAiLoginService(db: Db) {
           return;
         }
         if (session.expiresAt.getTime() > Date.now()) return;
-        await rm(loginHome(id), { recursive: true, force: true });
+        await rm(loginHome(id), REMOVE_ATTEMPT_DIRECTORY);
         await tx.update(adapterAuthSessions).set({
           status: session.connectionId ? "authenticated" : session.failureReason === RETIREMENT_PENDING ? "cancelled" : "timed_out",
           failureReason: null,
@@ -232,7 +236,7 @@ export function localAiLoginService(db: Db) {
         if (!restart || existing.connectionMethod !== LOCAL_LOGIN_METHOD)
           throw unprocessable("Another sign-in is still open. Finish it, or choose Start sign-in again to replace a local attempt.");
         if (existing.id !== retiredAttemptId) throw unprocessable("The sign-in attempt changed. Retry Start sign-in again.");
-        await rm(loginHome(existing.id), { recursive: true, force: true });
+        await rm(loginHome(existing.id), REMOVE_ATTEMPT_DIRECTORY);
         await tx.update(adapterAuthSessions).set({ status: "cancelled", expiresAt: null, failureReason: null, finishedAt: new Date(), updatedAt: new Date() })
           .where(eq(adapterAuthSessions.id, existing.id));
         await logActivity(tx as unknown as Db, {
@@ -260,7 +264,7 @@ export function localAiLoginService(db: Db) {
           entityType: "adapter_auth_session", entityId: id, details: { provider: intent.provider },
         });
       } catch (error) {
-        await rm(directory, { recursive: true, force: true });
+        await rm(directory, REMOVE_ATTEMPT_DIRECTORY);
         if ((error as { cause?: { code?: string }; code?: string }).cause?.code === "23505" ||
             (error as { code?: string }).code === "23505")
           throw unprocessable("Another sign-in is still open. Finish or cancel it before starting again.");
@@ -303,7 +307,11 @@ export function localAiLoginService(db: Db) {
           ? { error: "The server restarted during sign-in. Start sign-in again." }
           : login?.outcome === "failure"
             ? { error: login.error ?? "Sign-in ended before the account was connected. Start sign-in again." }
-            : {}) };
+            // The CLI finished and delivered its credential, but this host could not
+            // read it back; without a message the card just stays on the code field.
+            : login?.outcome === "success"
+              ? { error: "Sign-in finished, but the saved credential could not be read on this host. Start sign-in again." }
+              : {}) };
     }
   }
 
@@ -363,7 +371,7 @@ export function localAiLoginService(db: Db) {
     });
     // Failed cleanup can be retried by the same completed attempt or reaper.
     await stopBrowserLogin(id);
-    await rm(loginHome(id), { recursive: true, force: true });
+    await rm(loginHome(id), REMOVE_ATTEMPT_DIRECTORY);
     deferredRetirements.delete(id);
     return result;
   }
@@ -383,7 +391,7 @@ export function localAiLoginService(db: Db) {
         eq(adapterAuthSessions.connectionMethod, LOCAL_LOGIN_METHOD),
       )).for("update");
       if (!session) throw notFound("Local sign-in attempt not found.");
-      await rm(loginHome(id), { recursive: true, force: true });
+      await rm(loginHome(id), REMOVE_ATTEMPT_DIRECTORY);
       if (!session.connectionId && session.status !== "cancelled") {
         await tx.update(adapterAuthSessions).set({
           status: "cancelled", expiresAt: null, failureReason: null, finishedAt: new Date(), updatedAt: new Date(),

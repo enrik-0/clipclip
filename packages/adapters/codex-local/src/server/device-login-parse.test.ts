@@ -98,6 +98,43 @@ describe("parseDeviceLoginPrompt", () => {
     expect(result?.code).toBe("ABCD-EFGHJ");
   });
 
+  describe("Codex 0.160.0 screen layout", () => {
+    // Codex 0.160.0 paints each row at an absolute cursor position (CUP, ESC[row;colH)
+    // and only the code and URL lines carry a line break. Structure captured from the
+    // real CLI through a pseudo-terminal; the code is synthetic.
+    const ESC = "\x1b";
+    const screen = (code: string, url = EXACT_URL) => [
+      `${ESC}[?25l${ESC}[2J${ESC}[m${ESC}[HWelcome to Codex [v${ESC}[90m0.160.0${ESC}[m]\r\n`,
+      `${ESC}[7;1HFollow these steps to sign in with ChatGPT using device code authorization:`,
+      `${ESC}[9;1H1. Open this link in your browser and sign in to your account\r\n   ${ESC}[94m${url}${ESC}[m`,
+      `${ESC}[12;1H2. Enter this one-time code ${ESC}[90m(expires in 15 minutes)${ESC}[m\r\n   ${ESC}[94m${code}${ESC}[90m`,
+      `${ESC}[15;1HContinue only if you started this login in Codex. If a website or another person gave you this code, cancel.\r\n${ESC}[?25h`,
+    ].join("");
+
+    it("reads the URL and the code when rows are positioned with the cursor", () => {
+      const result = parseDeviceLoginPrompt(screen("ABCD-EFGHJ"));
+      expect(result).not.toBeNull();
+      expect(result?.url).toBe(EXACT_URL);
+      expect(result?.code).toBe("ABCD-EFGHJ");
+    });
+
+    it("still rejects a wrong origin and a code mixed with other text", () => {
+      expect(parseDeviceLoginPrompt(screen("ABCD-EFGHJ", "https://auth.example.com/codex/device"))).toBeNull();
+      expect(parseDeviceLoginPrompt(screen("ABCD-EFGHJ plus words"))).toBeNull();
+    });
+
+    it("reads it when the output arrives in small chunks", () => {
+      const text = screen("ABCD-EFGHJ");
+      let buffer = "";
+      let found: ReturnType<typeof parseDeviceLoginPrompt> = null;
+      for (let i = 0; i < text.length && !found; i += 29) {
+        buffer += text.slice(i, i + 29);
+        found = parseDeviceLoginPrompt(buffer);
+      }
+      expect(found?.code).toBe("ABCD-EFGHJ");
+    });
+  });
+
   it("parse_returns_null_when_prompt_absent", () => {
     const text = "Some unrelated log line\nNothing to see here\n";
     expect(parseDeviceLoginPrompt(text)).toBeNull();
