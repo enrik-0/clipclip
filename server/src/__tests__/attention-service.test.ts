@@ -2103,6 +2103,30 @@ describeEmbeddedPostgres("attention service", () => {
     expect(approvalItems[0]?.subject.metadata?.issueId).toBe(firstIssueId);
   });
 
+  it.each([false, true])("says that requesting changes on a tool action approval declines it (summary %s) (#24)", async (summaryOnly) => {
+    const { companyId } = await seedCompany(summaryOnly ? "ATU" : "ATT");
+    const toolApprovalId = randomUUID();
+    const otherApprovalId = randomUUID();
+    await db.insert(approvals).values([
+      { id: toolApprovalId, companyId, type: "request_board_approval", status: "pending", payload: { source: "tool_gateway", title: "Run delete_note" } },
+      { id: otherApprovalId, companyId, type: "request_board_approval", status: "pending", payload: { title: "Approve rollout" } },
+    ]);
+
+    const feed = await attentionService(db).list(companyId, { userId: "board-user", summaryOnly });
+    const toolItem = feed.items.find((item) => item.dedupKey === `approval:${toolApprovalId}`);
+    const otherItem = feed.items.find((item) => item.dedupKey === `approval:${otherApprovalId}`);
+
+    expect(toolItem?.subject.metadata?.decidesToolAction).toBe(true);
+    expect(toolItem?.decisionVerbs.find((verb) => verb.id === "request_revision")).toMatchObject({
+      label: "Request changes",
+      description: expect.stringContaining("Decline this action"),
+    });
+    expect(otherItem?.subject.metadata?.decidesToolAction).toBeUndefined();
+    expect(otherItem?.decisionVerbs.find((verb) => verb.id === "request_revision")).toMatchObject({
+      label: "Request revision",
+    });
+  });
+
   it("hides snoozed attention rows until snoozedUntil passes, then returns them unconditionally", async () => {
     const { companyId } = await seedCompany("ATS");
     const approvalId = randomUUID();

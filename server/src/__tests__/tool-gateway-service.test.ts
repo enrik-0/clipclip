@@ -52,6 +52,7 @@ import { commitToolActionReview } from "../services/tool-action-review.js";
 import { bindVerifiedToolApprovalArguments, claimToolTestApproval, releaseToolApproval, startToolInvocation } from "../services/tool-approval-execution.js";
 import { materializeNativeInteractionResponses } from "../services/native-runtime/native-interaction-bridge.js";
 import { toolActionDeliveryService } from "../services/tool-action-delivery.js";
+import { TOOL_ACTION_REVISION_DEFAULT_REASON, toolActionApprovalDecisionHandler } from "../services/tool-action-formal-approval.js";
 import { secretService } from "../services/secrets.js";
 import { toolAccessService } from "../services/tool-access.js";
 import {
@@ -1992,6 +1993,93 @@ describeEmbeddedPostgres("tool gateway service", () => {
     })).rejects.toMatchObject({ reasonCode: "action_not_approved" });
   });
 
+  it("returns a tool error for arguments that do not match the input schema and asks no human (#10)", async () => {
+    const { company, agent, run } = await createRunFixture(db);
+    await db.insert(toolPolicies).values(reviewNotePolicyRow(company));
+    const gateway = createTestToolGatewayService(db);
+    const session = await gateway.createSession(runSessionInput(company, agent, run));
+
+    await expect(gateway.executeTool({
+      sessionToken: session.token,
+      tool: "mcp-remote-fixture:update_note",
+      parameters: { noteId: "n1", text: "wrong property name" },
+    })).rejects.toMatchObject({
+      status: 422,
+      reasonCode: "invalid_tool_arguments",
+      message: expect.stringContaining("Expected properties: noteId (required), body (required)"),
+      details: {
+        tool: "mcp-remote-fixture:update_note",
+        missingProperties: ["body"],
+        unknownProperties: ["text"],
+        expectedProperties: ["noteId", "body"],
+      },
+    });
+    expect(await db.select().from(toolActionRequests)).toHaveLength(0);
+    expect(await db.select().from(issueThreadInteractions)).toHaveLength(0);
+    expect(await db.select().from(approvals)).toHaveLength(0);
+    expect(await db.select().from(toolInvocations)).toHaveLength(0);
+    const [audit] = await db.select().from(toolAccessAuditEvents)
+      .where(and(eq(toolAccessAuditEvents.action, "call_denied"), eq(toolAccessAuditEvents.reasonCode, "invalid_tool_arguments")));
+    expect(audit?.details).toMatchObject({ source: "tool_gateway.call_denied", unknownProperties: ["text"] });
+
+    // A valid call still creates the request and the card.
+    await expect(gateway.executeTool({
+      sessionToken: session.token,
+      tool: "mcp-remote-fixture:update_note",
+      parameters: { noteId: "n1", body: "short" },
+    })).rejects.toMatchObject({ reasonCode: "approval_required" });
+    expect(await db.select().from(toolActionRequests)).toHaveLength(1);
+    expect(await db.select().from(issueThreadInteractions)).toHaveLength(1);
+  });
+
+  it("checks a connected MCP tool against its catalog input schema before asking for approval (#10)", async () => {
+    const { company, agent, run } = await createRunFixture(db);
+    const { connection, catalogEntry } = await createRemoteMcpToolFixture(db, company.id);
+    await db.update(toolCatalogEntries).set({
+      name: "move_file", toolName: "move_file", riskLevel: "write", isReadOnly: false, isWrite: true,
+      inputSchema: {
+        type: "object",
+        properties: {
+          oldPath: { type: "string" }, newPath: { type: "string" },
+          confirmOldPath: { type: "string" }, confirmNewPath: { type: "string" },
+          overwrite: { type: "boolean", default: false },
+        },
+        required: ["oldPath", "newPath", "confirmOldPath", "confirmNewPath"],
+      },
+    }).where(eq(toolCatalogEntries.id, catalogEntry.id));
+    await db.insert(toolPolicies).values({
+      companyId: company.id, name: "Review vault writes", policyType: "require_approval",
+      selectors: { riskLevel: "write" },
+    });
+    const provider = vi.fn(async () => new Response("unexpected", { status: 500 }));
+    const gateway = createTestToolGatewayService(db, { remoteHttpRequest: provider });
+    const session = await gateway.createSession(runSessionInput(company, agent, run));
+    const tool = (await gateway.listToolsForSession(session.token)).find((entry) => entry.connectionId === connection.id)!;
+
+    await expect(gateway.executeTool({
+      sessionToken: session.token,
+      tool: tool.name,
+      parameters: { from: "esquema-backup.png", to: "Procedimientos/esquema-backup.png" },
+    })).rejects.toMatchObject({
+      reasonCode: "invalid_tool_arguments",
+      details: {
+        missingProperties: ["oldPath", "newPath", "confirmOldPath", "confirmNewPath"],
+        unknownProperties: ["from", "to"],
+        expectedProperties: ["oldPath", "newPath", "confirmOldPath", "confirmNewPath", "overwrite"],
+      },
+    });
+    expect(await db.select().from(toolActionRequests)).toHaveLength(0);
+    expect(await db.select().from(issueThreadInteractions)).toHaveLength(0);
+    expect(provider).not.toHaveBeenCalled();
+
+    await expect(gateway.executeTool({
+      sessionToken: session.token,
+      tool: tool.name,
+      parameters: { oldPath: "a.png", newPath: "b/a.png", confirmOldPath: "a.png", confirmNewPath: "b/a.png" },
+    })).rejects.toMatchObject({ reasonCode: "approval_required" });
+    expect(await db.select().from(toolActionRequests)).toHaveLength(1);
+  });
+
   it("approves a pending action request directly from the review queue and preserves signed arguments", async () => {
     const { company, agent, issue, run } = await createRunFixture(db);
     // Real runner calls carry immutable identity in their signed approval.
@@ -2245,7 +2333,7 @@ describeEmbeddedPostgres("tool gateway service", () => {
     await db.insert(toolPolicies).values({ companyId: company.id, name: "Ask first", policyType: "require_approval", selectors: { toolName: "mcp-remote-fixture:update_note" } });
     const gateway = createTestToolGatewayService(db);
     const session = await gateway.createSession(runSessionInput(company, agent, run));
-    await expect(gateway.executeTool({ sessionToken: session.token, tool: "mcp-remote-fixture:update_note", parameters: { noteId: "reassigned" } })).rejects.toMatchObject({ reasonCode: "approval_required" });
+    await expect(gateway.executeTool({ sessionToken: session.token, tool: "mcp-remote-fixture:update_note", parameters: { noteId: "reassigned", body: "review me" } })).rejects.toMatchObject({ reasonCode: "approval_required" });
     const [request] = await db.select().from(toolActionRequests);
     await gateway.declineActionRequest({ companyId: company.id, actionRequestId: request.id, actor: { userId: "reviewer" } });
     const [replacement] = await db.insert(agents).values({ companyId: company.id, name: "Replacement", role: "engineer", adapterType: "process" }).returning();
@@ -2263,7 +2351,7 @@ describeEmbeddedPostgres("tool gateway service", () => {
     await db.insert(toolPolicies).values({ companyId: company.id, name: "Ask first", policyType: "require_approval", selectors: { toolName: "mcp-remote-fixture:update_note" } });
     const gateway = createTestToolGatewayService(db);
     const session = await gateway.createSession(runSessionInput(company, agent, run));
-    await expect(gateway.executeTool({ sessionToken: session.token, tool: "mcp-remote-fixture:update_note", parameters: { noteId: "expire" } })).rejects.toMatchObject({ reasonCode: "approval_required" });
+    await expect(gateway.executeTool({ sessionToken: session.token, tool: "mcp-remote-fixture:update_note", parameters: { noteId: "expire", body: "review me" } })).rejects.toMatchObject({ reasonCode: "approval_required" });
     const [request] = await db.select().from(toolActionRequests);
     await db.update(toolActionRequests).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(toolActionRequests.id, request.id));
     const [originalInvocation] = await db.select().from(toolInvocations).where(eq(toolInvocations.id, request.invocationId));
@@ -2290,13 +2378,13 @@ describeEmbeddedPostgres("tool gateway service", () => {
     await db.insert(toolPolicies).values({ companyId: company.id, name: "Ask first", policyType: "require_approval", selectors: { toolName: "mcp-remote-fixture:update_note" } });
     const gateway = createTestToolGatewayService(db);
     const session = await gateway.createSession(runSessionInput(company, agent, run));
-    await expect(gateway.executeTool({ sessionToken: session.token, tool: "mcp-remote-fixture:update_note", parameters: { noteId: "expire" } })).rejects.toMatchObject({ reasonCode: "approval_required" });
+    await expect(gateway.executeTool({ sessionToken: session.token, tool: "mcp-remote-fixture:update_note", parameters: { noteId: "expire", body: "review me" } })).rejects.toMatchObject({ reasonCode: "approval_required" });
     const [expiring] = await db.select().from(toolActionRequests);
     await db.update(toolActionRequests).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(toolActionRequests.id, expiring.id));
     await gateway.sweepActionReviews();
     expect((await db.select().from(issueThreadInteractions))[0].status).toBe("expired");
     expect(await materializeNativeInteractionResponses({ db, companyId: company.id, issueId: issue.id, runId: randomUUID(), agentId: agent.id, interactionIds: [expiring.interactionId!] })).toMatchObject([{ response: { status: "expired", executionStatus: "expired" } }]);
-    await expect(gateway.executeTool({ sessionToken: session.token, tool: "mcp-remote-fixture:update_note", parameters: { noteId: "uncertain" } })).rejects.toMatchObject({ reasonCode: "approval_required" });
+    await expect(gateway.executeTool({ sessionToken: session.token, tool: "mcp-remote-fixture:update_note", parameters: { noteId: "uncertain", body: "review me" } })).rejects.toMatchObject({ reasonCode: "approval_required" });
     const pending = (await db.select().from(toolActionRequests)).find(row => row.status === "pending")!;
     await commitToolActionReview(db, { companyId: company.id, actionRequestId: pending.id, decision: "approved", actor: { userId: "reviewer" } });
     await db.update(toolActionRequests).set({ status: "executing", updatedAt: new Date(Date.now() - 11 * 60_000) }).where(eq(toolActionRequests.id, pending.id));
@@ -2364,7 +2452,7 @@ describeEmbeddedPostgres("tool gateway service", () => {
     await db.insert(toolPolicies).values({ companyId: company.id, name: "Ask first", policyType: "require_approval", selectors: { toolName: "mcp-remote-fixture:update_note" } });
     const gateway = createTestToolGatewayService(db);
     const session = await gateway.createSession(runSessionInput(company, agent, run));
-    await expect(gateway.executeTool({ sessionToken: session.token, tool: "mcp-remote-fixture:update_note", parameters: { noteId: "n1" } })).rejects.toMatchObject({ reasonCode: "approval_required" });
+    await expect(gateway.executeTool({ sessionToken: session.token, tool: "mcp-remote-fixture:update_note", parameters: { noteId: "n1", body: "review me" } })).rejects.toMatchObject({ reasonCode: "approval_required" });
     const [request] = await db.select().from(toolActionRequests);
     // This internal fixture has no connection and cannot grant action-wide access.
     await expect(gateway.approveActionRequest({ companyId: company.id, actionRequestId: request.id, rememberAction: true, actor: { userId: "reviewer" } })).rejects.toThrow();
@@ -2924,6 +3012,242 @@ describeEmbeddedPostgres("tool gateway service", () => {
     });
     expect(result.status).toBe("completed");
     expect((result.result as { result?: { data?: { target?: string } } }).result?.data?.target).toBe("repo");
+  });
+
+  describe("one decision for a high-risk action (#9)", () => {
+    async function destructiveRequestFixture() {
+      const { company, agent, issue, run } = await createRunFixture(db);
+      // A connected MCP tool marked destructive, like Obsidian delete_note.
+      const { connection, catalogEntry } = await createRemoteMcpToolFixture(db, company.id);
+      await db.update(toolCatalogEntries).set({
+        name: "delete_note", toolName: "delete_note", riskLevel: "destructive",
+        isReadOnly: false, isWrite: true, isDestructive: true,
+        inputSchema: { type: "object", properties: { target: { type: "string" } }, required: ["target"] },
+      }).where(eq(toolCatalogEntries.id, catalogEntry.id));
+      await db.insert(toolPolicies).values({
+        companyId: company.id,
+        name: "Review destructive tools",
+        policyType: "require_approval",
+        selectors: { riskLevel: "destructive" },
+      });
+      const executeSpy = vi.fn((_name: string, _args: unknown) => {});
+      const remoteHttpRequest = async (_url: string | URL, init: RequestInit) => {
+        const request = JSON.parse(String(init.body));
+        if (request.method === "tools/call") executeSpy(request.params.name, request.params.arguments);
+        return Response.json({ jsonrpc: "2.0", id: request.id, result: {
+          content: [{ type: "text", text: `deleted ${JSON.stringify(request.params?.arguments ?? {})}` }],
+        } });
+      };
+      const wakeup = vi.fn(async (agentId: string, input: any) => {
+        const [wake] = await db.insert(agentWakeupRequests).values({
+          companyId: company.id, agentId, source: input.source, idempotencyKey: input.idempotencyKey, payload: input.payload,
+        }).returning();
+        return wake as any;
+      });
+      const deliveries = toolActionDeliveryService(db, { wakeup });
+      const gateway = createTestToolGatewayService(db, {
+        remoteHttpRequest,
+        onToolActionSettled: deliveries.deliver,
+      });
+      const session = await gateway.createSession(runSessionInput(company, agent, run));
+      const tool = (await gateway.listToolsForSession(session.token)).find((entry) => entry.connectionId === connection.id)!;
+      expect(tool.risk).toBe("destructive");
+      await expect(gateway.executeTool({
+        sessionToken: session.token,
+        tool: tool.name,
+        parameters: { target: "obsolete-note" },
+      })).rejects.toMatchObject({ reasonCode: "approval_required" });
+      const [actionRequest] = await db.select().from(toolActionRequests);
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, actionRequest!.approvalId!));
+      expect(approval).toMatchObject({ status: "pending", type: "request_board_approval" });
+      const handler = toolActionApprovalDecisionHandler(db, gateway);
+      // The original run must end before the continuation wake is delivered.
+      const endRun = async () => {
+        await db.update(heartbeatRuns).set({ status: "succeeded" }).where(eq(heartbeatRuns.id, run.id));
+        await deliveries.deliverForRun({ companyId: company.id, runId: run.id });
+      };
+      return { company, agent, issue, run, gateway, handler, actionRequest: actionRequest!, approval: approval!, executeSpy, wakeup, endRun };
+    }
+
+    it("approving the formal approval in the Inbox runs the action once and wakes the agent with the result", async () => {
+      const fixture = await destructiveRequestFixture();
+      expect(fixture.handler.handles(fixture.approval)).toBe(true);
+
+      await fixture.handler.decide({ approval: fixture.approval, decision: "approved", decidedByUserId: "board-user" });
+
+      expect(fixture.executeSpy).toHaveBeenCalledTimes(1);
+      expect(fixture.executeSpy.mock.calls[0]![1]).toEqual({ target: "obsolete-note" });
+      const [request] = await db.select().from(toolActionRequests);
+      expect(request).toMatchObject({ status: "executed", decidedByUserId: "board-user" });
+      expect(request!.decidedAt).toBeInstanceOf(Date);
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval).toMatchObject({ status: "approved", decidedByUserId: "board-user" });
+      const [interaction] = await db.select().from(issueThreadInteractions).where(eq(issueThreadInteractions.id, request!.interactionId!));
+      expect(interaction).toMatchObject({ status: "accepted", result: { toolAction: { status: "executed" } } });
+      const [invocation] = await db.select().from(toolInvocations).where(eq(toolInvocations.id, request!.invocationId));
+      expect(invocation).toMatchObject({ status: "succeeded", approvalState: "approved" });
+      const activity = await db.select().from(activityLog).where(eq(activityLog.entityId, fixture.approval.id));
+      expect(activity.map((row) => row.action)).toContain("approval.approved");
+
+      // No wake while the action had not run; one wake with the result after the run ends.
+      expect(fixture.wakeup).not.toHaveBeenCalled();
+      await fixture.endRun();
+      expect(fixture.wakeup).toHaveBeenCalledTimes(1);
+      expect(fixture.wakeup.mock.calls[0]![1].payload.toolAction).toMatchObject({
+        executionStatus: "executed",
+        resultSummary: expect.stringContaining("obsolete-note"),
+      });
+
+      // A second decision from either place does not run the action again.
+      await fixture.handler.decide({ approval: fixture.approval, decision: "approved", decidedByUserId: "board-user" });
+      await fixture.gateway.approveActionRequest({
+        companyId: fixture.company.id, issueId: fixture.issue.id, interactionId: request!.interactionId!,
+        actionRequestId: request!.id, actor: { userId: "board-user" },
+      });
+      expect(fixture.executeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("Approve & run on the task card resolves the formal approval in the same decision", async () => {
+      const fixture = await destructiveRequestFixture();
+
+      const resolution = await fixture.gateway.approveActionRequest({
+        companyId: fixture.company.id, issueId: fixture.issue.id, interactionId: fixture.actionRequest.interactionId!,
+        actionRequestId: fixture.actionRequest.id, actor: { userId: "board-user" },
+      });
+
+      expect(resolution).toMatchObject({ status: "executed" });
+      expect(fixture.executeSpy).toHaveBeenCalledTimes(1);
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval).toMatchObject({ status: "approved", decidedByUserId: "board-user" });
+      // The Inbox item is now resolved; approving it again does nothing more.
+      await fixture.handler.decide({ approval: approval!, decision: "approved", decidedByUserId: "board-user" });
+      expect(fixture.executeSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("runs the action once when the Inbox and the card approve at the same time", async () => {
+      const fixture = await destructiveRequestFixture();
+
+      const outcomes = await Promise.allSettled([
+        fixture.handler.decide({ approval: fixture.approval, decision: "approved", decidedByUserId: "board-user" }),
+        fixture.gateway.approveActionRequest({
+          companyId: fixture.company.id, issueId: fixture.issue.id, interactionId: fixture.actionRequest.interactionId!,
+          actionRequestId: fixture.actionRequest.id, actor: { userId: "other-board-user" },
+        }),
+      ]);
+
+      expect(outcomes.some((outcome) => outcome.status === "fulfilled")).toBe(true);
+      expect(fixture.executeSpy).toHaveBeenCalledTimes(1);
+      const [request] = await db.select().from(toolActionRequests);
+      expect(request!.status).toBe("executed");
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval!.status).toBe("approved");
+    });
+
+    it("rejecting in the Inbox declines the action, never runs it and tells the agent", async () => {
+      const fixture = await destructiveRequestFixture();
+
+      await fixture.handler.decide({
+        approval: fixture.approval, decision: "rejected", decidedByUserId: "board-user", decisionNote: "Keep the note",
+      });
+
+      expect(fixture.executeSpy).not.toHaveBeenCalled();
+      const [request] = await db.select().from(toolActionRequests);
+      expect(request).toMatchObject({ status: "rejected", decidedByUserId: "board-user" });
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval).toMatchObject({ status: "rejected", decisionNote: "Keep the note" });
+      const [interaction] = await db.select().from(issueThreadInteractions).where(eq(issueThreadInteractions.id, request!.interactionId!));
+      expect(interaction).toMatchObject({ status: "rejected", result: { outcome: "rejected", reason: "Keep the note" } });
+      await fixture.endRun();
+      expect(fixture.wakeup).toHaveBeenCalledTimes(1);
+      expect(fixture.wakeup.mock.calls[0]![1].payload.toolAction).toMatchObject({ executionStatus: "rejected" });
+
+      // The card cannot approve and run a rejected action afterwards.
+      await expect(fixture.gateway.approveActionRequest({
+        companyId: fixture.company.id, actionRequestId: request!.id, actor: { userId: "board-user" },
+      })).rejects.toMatchObject({ status: 409 });
+      expect(fixture.executeSpy).not.toHaveBeenCalled();
+    });
+
+    it("requesting a revision in the Inbox declines the action with the note and tells the agent (#24)", async () => {
+      const fixture = await destructiveRequestFixture();
+      expect(fixture.handler.handles(fixture.approval)).toBe(true);
+
+      await fixture.handler.decide({
+        approval: fixture.approval, decision: "revision_requested", decidedByUserId: "board-user",
+        decisionNote: "Archive the note instead",
+      });
+      // A repeat request does not decide the action again.
+      await fixture.handler.decide({
+        approval: fixture.approval, decision: "revision_requested", decidedByUserId: "board-user",
+        decisionNote: "Archive the note instead",
+      });
+
+      expect(fixture.executeSpy).not.toHaveBeenCalled();
+      const [request] = await db.select().from(toolActionRequests);
+      expect(request).toMatchObject({ status: "rejected", decidedByUserId: "board-user" });
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval).toMatchObject({ status: "rejected", decidedByUserId: "board-user", decisionNote: "Archive the note instead" });
+      const [interaction] = await db.select().from(issueThreadInteractions).where(eq(issueThreadInteractions.id, request!.interactionId!));
+      expect(interaction).toMatchObject({ status: "rejected", result: { outcome: "rejected", reason: "Archive the note instead" } });
+      const [invocation] = await db.select().from(toolInvocations).where(eq(toolInvocations.id, request!.invocationId));
+      expect(invocation).toMatchObject({ status: "denied", approvalState: "rejected" });
+      const activity = await db.select().from(activityLog).where(eq(activityLog.entityId, fixture.approval.id));
+      expect(activity.filter((row) => row.action === "approval.rejected")).toHaveLength(1);
+
+      await fixture.endRun();
+      expect(fixture.wakeup).toHaveBeenCalledTimes(1);
+      expect(fixture.wakeup.mock.calls[0]![1].payload.toolAction).toMatchObject({
+        executionStatus: "rejected",
+        declineReason: "Archive the note instead",
+      });
+      await expect(fixture.gateway.approveActionRequest({
+        companyId: fixture.company.id, actionRequestId: request!.id, actor: { userId: "board-user" },
+      })).rejects.toMatchObject({ status: 409 });
+      expect(fixture.executeSpy).not.toHaveBeenCalled();
+    });
+
+    it("requesting a revision without a note declines the action with the default reason (#24)", async () => {
+      const fixture = await destructiveRequestFixture();
+
+      await fixture.handler.decide({ approval: fixture.approval, decision: "revision_requested", decidedByUserId: "board-user" });
+
+      expect(fixture.executeSpy).not.toHaveBeenCalled();
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval).toMatchObject({ status: "rejected", decisionNote: TOOL_ACTION_REVISION_DEFAULT_REASON });
+      await fixture.endRun();
+      expect(fixture.wakeup.mock.calls[0]![1].payload.toolAction).toMatchObject({
+        executionStatus: "rejected",
+        declineReason: TOOL_ACTION_REVISION_DEFAULT_REASON,
+      });
+    });
+
+    it("declining on the task card also rejects the formal approval", async () => {
+      const fixture = await destructiveRequestFixture();
+
+      await fixture.gateway.declineActionRequest({
+        companyId: fixture.company.id, issueId: fixture.issue.id, interactionId: fixture.actionRequest.interactionId!,
+        actionRequestId: fixture.actionRequest.id, actor: { userId: "board-user" },
+      });
+
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval).toMatchObject({ status: "rejected", decidedByUserId: "board-user" });
+      await expect(fixture.handler.decide({ approval: approval!, decision: "approved", decidedByUserId: "board-user" }))
+        .rejects.toMatchObject({ status: 409 });
+      expect(fixture.executeSpy).not.toHaveBeenCalled();
+    });
+
+    it("closes the formal approval when its action expired, without running anything", async () => {
+      const fixture = await destructiveRequestFixture();
+      await db.update(toolActionRequests).set({ status: "expired", resolvedAt: new Date() })
+        .where(eq(toolActionRequests.id, fixture.actionRequest.id));
+
+      await expect(fixture.handler.decide({ approval: fixture.approval, decision: "approved", decidedByUserId: "board-user" }))
+        .rejects.toMatchObject({ status: 409 });
+
+      expect(fixture.executeSpy).not.toHaveBeenCalled();
+      const [approval] = await db.select().from(approvals).where(eq(approvals.id, fixture.approval.id));
+      expect(approval!.status).toBe("cancelled");
+    });
   });
 
   it.each([

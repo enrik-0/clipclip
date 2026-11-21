@@ -24,6 +24,77 @@ recorded result in a new turn and writes the user-facing answer. Live activity
 invalidation refreshes both surfaces, with existing polling/reconnect reconciliation
 retained.
 
+## Argument check before review
+
+Before the gateway creates a review, it checks the call arguments against the
+input schema that the agent was shown for the tool. If they do not match, the
+agent gets a tool error (`invalid_tool_arguments`, HTTP 422; through MCP
+`tools/call` it is a result with `isError: true`). The error names the missing
+required properties, the unknown properties, the invalid values, and all the
+expected property names. No action request, card or formal approval is created,
+so no person reviews a call that cannot succeed. The audit log records a
+`call_denied` event with the same details.
+
+Rules:
+
+- The check validates only. It does not fill defaults, rename properties or
+  convert types.
+- A top-level property that is not in the schema `properties` is an error,
+  unless the schema allows extra properties (`additionalProperties` other than
+  `false`, `patternProperties`, or a composed schema such as `allOf`).
+- A tool without an input schema, with an empty schema, or with an object
+  schema that lists no `properties`, is not checked. The call goes on to review
+  unchanged, because the gateway cannot tell a mistake from a valid call.
+- A schema that the validator cannot compile is not checked either. A provider
+  schema that the validator cannot read must not block every call.
+- Calls that do not need approval are not checked. The provider still validates
+  them.
+
+The check is in `server/src/services/tool-argument-schema.ts`.
+
+## High-risk actions: one decision
+
+A `destructive` action also gets a formal board approval in the Inbox, linked
+to the task. One decision is enough, from either place:
+
+- **Approve** in the Inbox, or **Approve & run** on the task card, resolves the
+  formal approval and the action request in one review transaction. The action
+  then runs once with the signed, stored arguments, and the outcome is recorded
+  on the request and on the card (Succeeded or Execution failed).
+- **Reject** in the Inbox, or **Decline** on the card, resolves both records.
+  The action does not run.
+- **Request changes** (the request-revision decision) in the Inbox is a
+  decline with the note as the reason. The agent cannot revise a tool call in
+  place, so the action request is declined and never runs, and the formal
+  approval becomes `rejected` with the note as its decision note. Both records
+  are resolved in the same review transaction as **Reject**, and the
+  `approval.rejected` activity entry is written. The agent gets the note as the
+  decline reason in its wake, so it can try another way. Without a note, the
+  reason is a short default text that tells the agent the board requested
+  changes (`TOOL_ACTION_REVISION_DEFAULT_REASON`). Other approvals keep the
+  usual request-revision flow: the status becomes `revision_requested` and the
+  requester can resubmit.
+- The agent is woken only after the outcome is recorded, through the
+  continuation described below. The wake carries the result, the failure or
+  the decline. The approvals route does not send its own requester wake for
+  these approvals.
+- The action runs at most once. Execution claims the request with a guarded
+  `approved` to `executing` update, so concurrent decisions from the Inbox and
+  the card, or repeated clicks, run it once. A repeated decision returns the
+  recorded outcome.
+- A formal approval that is already rejected or cancelled blocks the card
+  approval. If the action expired or was cancelled before the Inbox decision,
+  the Inbox decision closes the formal approval as cancelled and nothing runs.
+
+Ownership: the approvals routes keep the access checks (board user with access
+to the company). They pass decisions on approvals with `source: "tool_gateway"`
+to a handler that the tool gateway registers
+(`server/src/services/approval-decision-handlers.ts`,
+`server/src/services/tool-action-formal-approval.ts`). The review transaction
+in `server/src/services/tool-action-review.ts` resolves the formal approval and
+writes the `approval.approved` or `approval.rejected` activity entry. The
+handler, not the route, decides that a revision request declines the action.
+
 ## Remembered permission
 
 Choose **Always allow** from the split button beside **Approve & run**. It

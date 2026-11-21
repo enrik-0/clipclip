@@ -1,8 +1,9 @@
 import { notifyChatRunMilestones } from "./chat-run-milestone-notifications.js";
 import { notifyToolReviewChange } from "./tool-review-work-notifications.js";
 import { notifyDeliveryWork, DELIVERY_QUEUES } from "./delivery-work-notifications.js";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import {
+  approvals,
   issues,
   issueThreadInteractions,
   toolActionRequests,
@@ -14,11 +15,79 @@ import { conflict, forbidden, notFound } from "../errors.js";
 import { assertIssueThreadInteractionResolverAudience } from "./issue-thread-interaction-resolution.js";
 import { emitConnectionInvoked } from "./connector-telemetry.js";
 import { toolAccessPolicyService } from "./tool-access-policy.js";
+import { notifyApprovalWork } from "./approval-work-notifications.js";
+import { resolvableApprovalStatuses } from "../lib/approval-records.js";
 import {
   logActivity,
   publishActivity,
   type ActivityPublication,
 } from "./activity-log.js";
+
+/**
+ * A high-risk action also has a formal board approval. One human decision
+ * resolves both records in the review transaction, so the Inbox approval and
+ * the task card can never disagree. A formal approval that was already
+ * rejected or cancelled blocks an approval of the action.
+ */
+async function resolveLinkedFormalApproval(
+  tx: Db,
+  input: {
+    companyId: string;
+    approvalId: string;
+    actionRequestId: string;
+    decision: "approved" | "rejected";
+    userId: string;
+    reason?: string;
+  },
+  publications: ActivityPublication[],
+) {
+  const [formal] = await tx
+    .select()
+    .from(approvals)
+    .where(and(eq(approvals.id, input.approvalId), eq(approvals.companyId, input.companyId)))
+    .for("update");
+  if (!formal) {
+    if (input.decision === "approved")
+      throw conflict("The formal board approval for this action is unavailable");
+    return;
+  }
+  if (formal.status === input.decision) return;
+  if (!resolvableApprovalStatuses.includes(formal.status)) {
+    if (input.decision === "approved")
+      throw conflict("The formal board approval for this action was rejected or cancelled");
+    // Declining still stops the action when the formal approval is closed.
+    return;
+  }
+  await notifyApprovalWork(tx, input.companyId, { approvalId: formal.id });
+  const now = new Date();
+  await tx
+    .update(approvals)
+    .set({
+      status: input.decision,
+      decidedByUserId: input.userId,
+      decisionNote: input.decision === "rejected" ? input.reason ?? null : null,
+      decidedAt: now,
+      updatedAt: now,
+    })
+    .where(and(eq(approvals.id, formal.id), inArray(approvals.status, resolvableApprovalStatuses)));
+  await logActivity(
+    tx,
+    {
+      companyId: input.companyId,
+      actorType: "user",
+      actorId: input.userId,
+      action: input.decision === "approved" ? "approval.approved" : "approval.rejected",
+      entityType: "approval",
+      entityId: formal.id,
+      details: {
+        type: formal.type,
+        actionRequestId: input.actionRequestId,
+        resolvedWith: "tool_action_review",
+      },
+    },
+    publications,
+  );
+}
 
 /** The shared transaction for both task and Connections review decisions. */
 export async function commitToolActionReview(
@@ -87,6 +156,16 @@ export async function commitToolActionReview(
       )
       .for("update");
     if (!current) throw notFound("Tool action request not found");
+    const formalApprovalDecision = current.approvalId
+      ? {
+          companyId: input.companyId,
+          approvalId: current.approvalId,
+          actionRequestId: current.id,
+          decision: input.decision,
+          userId: input.actor.userId ?? "board",
+          reason: input.reason,
+        }
+      : null;
     if (current.status !== "pending") {
       if (
         (input.decision === "approved" &&
@@ -94,8 +173,13 @@ export async function commitToolActionReview(
             current.status,
           )) ||
         current.status === input.decision
-      )
+      ) {
+        // Repeat decisions are idempotent. They also close a formal approval
+        // that an earlier release left open beside a decided action.
+        if (formalApprovalDecision)
+          await resolveLinkedFormalApproval(tx as unknown as Db, formalApprovalDecision, publications);
         return current;
+      }
       throw conflict("This review has already been resolved");
     }
     if (
@@ -141,6 +225,8 @@ export async function commitToolActionReview(
       if (interaction.status !== "pending")
         throw conflict("This review has already been resolved");
     }
+    if (formalApprovalDecision)
+      await resolveLinkedFormalApproval(tx as unknown as Db, formalApprovalDecision, publications);
     const now = new Date();
     if (interaction && issue) await notifyChatRunMilestones(tx, interaction);
     await notifyToolReviewChange(tx, current.companyId);

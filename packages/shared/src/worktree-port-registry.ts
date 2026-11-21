@@ -18,6 +18,9 @@ const WORKTREE_PORT_REGISTRY_LOCK_STALE_MS = 5_000;
 const WORKTREE_PORT_REGISTRY_LOCK_TIMEOUT_MS = 10_000;
 const WORKTREE_PORT_REGISTRY_LOCK_HEARTBEAT_MS = 1_000;
 const WORKTREE_PORT_REGISTRY_LOCK_PROBE_TIMEOUT_MS = 500;
+const WINDOWS_RENAME_RETRY_TIMEOUT_MS = 2_000;
+const WINDOWS_RENAME_RETRY_DELAY_MS = 10;
+const WINDOWS_TRANSIENT_RENAME_CODES = new Set(["EACCES", "EBUSY", "EPERM"]);
 const sleepSyncBuffer = new Int32Array(new SharedArrayBuffer(4));
 
 type RegistryLockOwner = {
@@ -160,24 +163,28 @@ function readRegistryLockOwner(lockPath: string): RegistryLockOwner | null {
   return null;
 }
 
-const TRANSIENT_RENAME_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
-const RENAME_MAX_ATTEMPTS = 20;
-
-/**
- * Atomically replaces `to` with `from`. On Windows a rename over a file that
- * another handle is reading (for example the lock heartbeat thread reading
- * owner.json) fails with EPERM/EACCES/EBUSY until that handle is released, so
- * retry those briefly. Any other failure is raised immediately.
- */
-function renameReplacing(from: string, to: string): void {
-  for (let attempt = 1; ; attempt += 1) {
+// Windows refuses to replace a file while another handle has it open (for
+// example the lock heartbeat reading the owner record, a sibling process
+// reading the registry, or a virus scanner). The error is transient, so retry
+// for a bounded time. Other platforms replace the file atomically and never
+// retry.
+function replaceFileSync(temporaryPath: string, targetPath: string): void {
+  const deadline = Date.now() + WINDOWS_RENAME_RETRY_TIMEOUT_MS;
+  while (true) {
     try {
-      fs.renameSync(from, to);
+      fs.renameSync(temporaryPath, targetPath);
       return;
     } catch (error) {
       const code = error instanceof Error && "code" in error ? String(error.code) : "";
-      if (attempt >= RENAME_MAX_ATTEMPTS || !TRANSIENT_RENAME_CODES.has(code)) throw error;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(10 * attempt, 50));
+      if (
+        process.platform !== "win32"
+        || !WINDOWS_TRANSIENT_RENAME_CODES.has(code)
+        || Date.now() >= deadline
+      ) {
+        fs.rmSync(temporaryPath, { force: true });
+        throw error;
+      }
+      Atomics.wait(sleepSyncBuffer, 0, 0, WINDOWS_RENAME_RETRY_DELAY_MS);
     }
   }
 }
@@ -191,7 +198,7 @@ function writeRegistryLockOwner(lockPath: string, owner: RegistryLockOwner): voi
     const ownerPath = path.join(lockPath, ownerFile);
     const temporaryPath = `${ownerPath}.${owner.token}.tmp`;
     fs.writeFileSync(temporaryPath, contents, { mode: 0o600 });
-    renameReplacing(temporaryPath, ownerPath);
+    replaceFileSync(temporaryPath, ownerPath);
   }
 }
 
@@ -429,5 +436,5 @@ export function writeWorktreePortRegistry(homeDir: string, configPaths: Iterable
   };
   const temporaryPath = `${registryPath}.${process.pid}.tmp`;
   fs.writeFileSync(temporaryPath, `${JSON.stringify(registry, null, 2)}\n`, { mode: 0o600 });
-  renameReplacing(temporaryPath, registryPath);
+  replaceFileSync(temporaryPath, registryPath);
 }

@@ -3,8 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { Worker } from "node:worker_threads";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
+  readWorktreePortRegistry,
   withWorktreePortRegistryLock,
   withWorktreePortRegistryLockSync,
   writeWorktreePortRegistry,
@@ -282,39 +283,45 @@ describe("worktree port registry lock", () => {
 
     expect(fs.existsSync(lockPath)).toBe(false);
   });
-});
 
-describe("worktree port registry atomic replace on Windows", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("retries a transient EPERM when renaming over an owner or registry file", () => {
-    // On Windows, renaming over a file another handle is reading (the lock
-    // heartbeat thread reads owner.json) fails with EPERM until it is released.
+  it("replaces the registry file while another thread holds it open", () => {
     const homeDir = makeTemporaryRoot();
-    const realRename = fs.renameSync.bind(fs);
-    let failures = 0;
-    vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
-      if (failures < 3) {
-        failures += 1;
-        throw Object.assign(new Error("EPERM: operation not permitted, rename"), { code: "EPERM" });
-      }
-      return realRename(from, to);
-    });
+    const firstConfigPath = path.join(homeDir, "first", ".paperclip", "config.json");
+    const secondConfigPath = path.join(homeDir, "second", ".paperclip", "config.json");
+    for (const configPath of [firstConfigPath, secondConfigPath]) {
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, "{}\n");
+    }
+    writeWorktreePortRegistry(homeDir, [firstConfigPath]);
+    const registryPath = path.join(homeDir, "worktree-port-reservations.json");
 
-    expect(withWorktreePortRegistryLockSync(homeDir, () => "acquired")).toBe("acquired");
-    expect(failures).toBe(3);
+    // Windows rejects a rename over a file that another handle has open.
+    // The reader runs on its own thread because the write blocks this one.
+    const control = new Int32Array(new SharedArrayBuffer(4));
+    const reader = new Worker(`
+const fs = require("node:fs");
+const { workerData } = require("node:worker_threads");
+const control = new Int32Array(workerData.control);
+const descriptor = fs.openSync(workerData.registryPath, "r");
+Atomics.store(control, 0, 1);
+Atomics.notify(control, 0);
+setTimeout(() => {
+  fs.closeSync(descriptor);
+  process.exit(0);
+}, 300);
+`, { eval: true, workerData: { control: control.buffer, registryPath } });
+    try {
+      Atomics.wait(control, 0, 0, 5_000);
+      expect(Atomics.load(control, 0)).toBe(1);
 
-    writeWorktreePortRegistry(homeDir, []);
-    expect(fs.existsSync(path.join(homeDir, "worktree-port-reservations.json"))).toBe(true);
-  });
+      writeWorktreePortRegistry(homeDir, [firstConfigPath, secondConfigPath]);
+    } finally {
+      void reader.terminate();
+    }
 
-  it("does not hide a non-transient rename failure", () => {
-    const homeDir = makeTemporaryRoot();
-    vi.spyOn(fs, "renameSync").mockImplementation(() => {
-      throw Object.assign(new Error("ENOENT: no such file"), { code: "ENOENT" });
-    });
-    expect(() => withWorktreePortRegistryLockSync(homeDir, () => "x")).toThrow(/ENOENT/);
+    expect(readWorktreePortRegistry(homeDir)).toEqual(
+      new Set([path.resolve(firstConfigPath), path.resolve(secondConfigPath)]),
+    );
+    expect(fs.readdirSync(homeDir).filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
   });
 });

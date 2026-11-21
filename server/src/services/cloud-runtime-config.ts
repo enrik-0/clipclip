@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { open } from "node:fs/promises";
+import { lstat, open } from "node:fs/promises";
 import path from "node:path";
 import { eq } from "drizzle-orm";
 import { instanceSettings, type Db } from "@paperclipai/db";
@@ -65,10 +65,17 @@ export function legacyCloudRuntimeConfigPath(env: CloudInstanceEnv = process.env
 export async function readLegacyCloudRuntimeConfig(env: CloudInstanceEnv = process.env): Promise<CloudRuntimeConfig | null> {
   let raw: unknown;
   try {
-    const file = await open(legacyCloudRuntimeConfigPath(env), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const configPath = legacyCloudRuntimeConfigPath(env);
+    // Windows has no O_NOFOLLOW (the constant is undefined there), so open()
+    // would follow a link. Refuse links with lstat() first, then make sure the
+    // opened file is the same file that lstat() saw.
+    const linkStat = constants.O_NOFOLLOW === undefined ? await lstat(configPath) : null;
+    if (linkStat?.isSymbolicLink()) throw new Error("linked file");
+    const file = await open(configPath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
     try {
       const stat = await file.stat();
       if (!stat.isFile() || stat.size > 65_536) throw new Error("invalid file");
+      if (linkStat && (linkStat.dev !== stat.dev || linkStat.ino !== stat.ino)) throw new Error("replaced file");
       const buffer = Buffer.alloc(65_537);
       let total = 0;
       while (total < buffer.length) {

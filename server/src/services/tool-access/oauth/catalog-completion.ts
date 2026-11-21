@@ -1,6 +1,6 @@
 import { connectionActorUserId } from "../actor.js";
 import type { ActorInfo } from "../types.js";
-import { isRemoteMcpConnectorMethod } from "@paperclipai/shared";
+import { isRemoteMcpConnectorMethod, isSuggestedAskFirstAction } from "@paperclipai/shared";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { issueThreadInteractions, toolConnectionInstalls, toolConnections } from "@paperclipai/db";
@@ -82,13 +82,6 @@ export function createOAuthCatalogCompletion(db: Db, finishGalleryAppConnection:
         : companyInstall
           ? "all_agents"
           : { agentIds };
-    const askFirstRiskLevels = new Set(
-      Array.isArray(input.suggestedDefaults.askFirstRiskLevels)
-        ? input.suggestedDefaults.askFirstRiskLevels.filter(
-            (riskLevel): riskLevel is string => typeof riskLevel === "string",
-          )
-        : [],
-    );
     const enabledCatalog = input.catalog.filter(
       (entry) =>
         entry.status === "active" ||
@@ -100,7 +93,7 @@ export function createOAuthCatalogCompletion(db: Db, finishGalleryAppConnection:
       {
         enabledCatalogEntryIds: enabledCatalog.map((entry) => entry.id),
         askFirstCatalogEntryIds: enabledCatalog
-          .filter((entry) => askFirstRiskLevels.has(entry.riskLevel))
+          .filter((entry) => isSuggestedAskFirstAction(input.suggestedDefaults, entry))
           .map((entry) => entry.id),
         reviewedCatalogEntryIds:
           input.activateQuarantined === true

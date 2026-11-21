@@ -9,6 +9,7 @@ import type { ActivityOutsideHoursMode, CompanyActivitySchedule } from "@papercl
 import { registerServerAdapter, unregisterServerAdapter } from "../adapters/index.js";
 import { heartbeatService } from "../services/heartbeat.js";
 import { executionProjectionsForRuns } from "../services/execution-projection.js";
+import { queueIssueAssignmentWakeup } from "../services/issue-assignment-wakeup.js";
 import { recoveryPostgresSupport, startRecoveryPostgres } from "./helpers/recovery-postgres.js";
 
 const describePostgres = recoveryPostgresSupport.supported ? describe : describe.skip;
@@ -62,7 +63,7 @@ describePostgres("heartbeat activity hours wait", () => {
 
   async function seed(outsideHours: ActivityOutsideHoursMode | null, now = outside) {
     clock = now;
-    const companyId = randomUUID(), agentId = randomUUID(), issueId = randomUUID();
+    const companyId = randomUUID(), agentId = randomUUID(), managerAgentId = randomUUID(), issueId = randomUUID();
     const userId = `hours-user-${companyId}`;
     const activitySchedule: CompanyActivitySchedule | null = outsideHours && {
       enabled: true, timezone: "UTC", outsideHours, staggerMinutes: 10,
@@ -73,8 +74,11 @@ describePostgres("heartbeat activity hours wait", () => {
     await db.insert(companyMemberships).values({ companyId, principalId: userId, principalType: "user", status: "active", membershipRole: "member" });
     await db.insert(agents).values({ id: agentId, companyId, name: "Night agent", adapterType, status: "idle", adapterConfig: {},
       runtimeConfig: { heartbeat: { enabled: true, intervalSec: 3600 } } });
+    // Assigns work to the night agent in the agent assignment cases.
+    await db.insert(agents).values({ id: managerAgentId, companyId, name: "Manager agent", adapterType, status: "idle", adapterConfig: {},
+      runtimeConfig: { heartbeat: { enabled: false } } });
     await db.insert(issues).values({ id: issueId, companyId, title: "Work for tonight", status: "todo", assigneeAgentId: agentId, responsibleUserId: userId, issueNumber: 1 });
-    return { companyId, agentId, issueId, userId };
+    return { companyId, agentId, managerAgentId, issueId, userId };
   }
 
   type Fixture = Awaited<ReturnType<typeof seed>>;
@@ -97,6 +101,23 @@ describePostgres("heartbeat activity hours wait", () => {
     source: "on_demand", triggerDetail: "manual", reason: "manual",
     requestedByActorType: "user", requestedByActorId: f.userId, manualUserWake: true, ...task(f),
   });
+
+  /** The wake an issue assignment queues, as the issue routes and routines queue it. */
+  async function assign(f: Fixture, actor: { type: "user" | "agent" | "system"; id: string | null }) {
+    const run = await queueIssueAssignmentWakeup({
+      heartbeat, issue: { id: f.issueId, assigneeAgentId: f.agentId, status: "todo" },
+      reason: "issue_assigned", mutation: "create", contextSource: "issue.create",
+      requestedByActorType: actor.type, requestedByActorId: actor.id, rethrowOnError: true,
+    }) as { id: string } | null | undefined;
+    expect(run).toBeTruthy();
+    await heartbeat.drainActiveRunExecutions();
+    const [finished] = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, run!.id));
+    expect(finished).toMatchObject({ invocationSource: "assignment" });
+    return finished;
+  }
+  const byUser = (f: Fixture) => assign(f, { type: "user", id: f.userId });
+  const byAgent = (f: Fixture) => assign(f, { type: "agent", id: f.managerAgentId });
+  const bySchedule = (f: Fixture) => assign(f, { type: "system", id: null });
 
   it("holds automatic work until the next window opens and then starts it", async () => {
     const f = await seed("defer_automatic");
@@ -154,6 +175,32 @@ describePostgres("heartbeat activity hours wait", () => {
 
     const started = await runNow(await seed("defer_all"));
     expect(dispatched.has(started.id)).toBe(true);
+  }, 60_000);
+
+  it("starts an assignment a board user made when only automatic work waits", async () => {
+    const finished = await byUser(await seed("defer_automatic"));
+    expect(dispatched.has(finished.id)).toBe(true);
+    expect(finished.errorCode).not.toBe("activity_hours_wait");
+  }, 60_000);
+
+  it("holds an assignment an agent or a scheduled routine made when only automatic work waits", async () => {
+    for (const assignment of [byAgent, bySchedule]) {
+      const held = await assignment(await seed("defer_automatic"));
+      expect(dispatched.has(held.id)).toBe(false);
+      expect(held).toMatchObject({ status: "cancelled", errorCode: "activity_hours_wait" });
+    }
+  }, 60_000);
+
+  it("holds every assignment when all work waits, whoever made it", async () => {
+    for (const assignment of [byUser, byAgent]) {
+      const f = await seed("defer_all");
+      const held = await assignment(f);
+      expect(dispatched.has(held.id)).toBe(false);
+      expect(held).toMatchObject({ status: "cancelled", errorCode: "activity_hours_wait" });
+      const retry = (await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.agentId, f.agentId)))
+        .find(run => run.status === "scheduled_retry");
+      expect(retry!.scheduledRetryAt!.getTime()).toBeGreaterThanOrEqual(opensAt.getTime());
+    }
   }, 60_000);
 
   it("skips a periodic timer check without queueing a successor", async () => {
