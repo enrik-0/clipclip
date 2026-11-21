@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -30,6 +31,22 @@ export function readEnvFile(filePath, fsImpl = fs) {
   return values;
 }
 
+/**
+ * Returns the secret the server signs agent API keys with. A value already in
+ * `serverEnv` (process environment or env file) is kept as is. Otherwise a new
+ * one is generated and appended to the env file, so every later start reuses it
+ * and keys issued earlier stay valid.
+ */
+function ensureAgentJwtSecret(envFile, serverEnv, fsImpl) {
+  if (serverEnv.PAPERCLIP_AGENT_JWT_SECRET) return null;
+  const secret = randomBytes(48).toString("base64url");
+  fsImpl.mkdirSync(path.dirname(envFile), { recursive: true });
+  const existing = fsImpl.existsSync(envFile) ? fsImpl.readFileSync(envFile, "utf8") : "";
+  const separator = existing === "" || existing.endsWith("\n") ? "" : "\n";
+  fsImpl.writeFileSync(envFile, `${existing}${separator}PAPERCLIP_AGENT_JWT_SECRET=${secret}\n`, { mode: 0o600 });
+  return secret;
+}
+
 function firstExisting(candidates, fsImpl) {
   return candidates.find((candidate) => fsImpl.existsSync(candidate)) ?? null;
 }
@@ -52,6 +69,13 @@ export function resolveDesktopConfig({ env, desktopDir, fsImpl = fs, packaged = 
     : path.join(repoRoot, ".paperclip", ".env");
   const envFile = path.resolve(env.PAPERCLIP_DESKTOP_ENV_FILE || defaultEnvFile);
   const serverEnv = { ...readEnvFile(envFile, fsImpl), ...env };
+  if (packaged) {
+    // `paperclipai onboard` creates this secret in a repository checkout. An
+    // installed build has no onboarding step, and without it the server cannot
+    // issue the API key its agents need to report back.
+    const secret = ensureAgentJwtSecret(envFile, serverEnv, fsImpl);
+    if (secret) serverEnv.PAPERCLIP_AGENT_JWT_SECRET = secret;
+  }
   if (packaged && !env.PAPERCLIP_DESKTOP_NODE) serverEnv.ELECTRON_RUN_AS_NODE = "1";
 
   const sourceEntry = path.join(repoRoot, "server", "src", "index.ts");

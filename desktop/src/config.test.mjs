@@ -130,3 +130,30 @@ test("a packaged build runs its bundled server with Electron as Node and keeps i
   assert.equal(custom.nodePath, "node");
   assert.equal(custom.serverEnv.ELECTRON_RUN_AS_NODE, undefined);
 });
+
+test("a packaged build creates the agent JWT secret once and keeps it in its env file", () => {
+  const runtime = makeRepo({ "server/dist/index.js": "" });
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-desktop-data-"));
+  const packaged = { runtimeDir: runtime, userDataDir: userData, execPath: path.join(runtime, "app.exe") };
+  const resolve = (env = {}) => resolveDesktopConfig({ env, desktopDir: path.join(runtime, "app.asar"), packaged });
+
+  const first = resolve();
+  const secret = first.serverEnv.PAPERCLIP_AGENT_JWT_SECRET;
+  assert.ok(secret && secret.length >= 32, "a secret of at least 32 characters is generated");
+  assert.equal(readEnvFile(path.join(userData, ".env")).PAPERCLIP_AGENT_JWT_SECRET, secret);
+
+  // Later starts reuse it: agent keys issued under the old secret stay valid.
+  assert.equal(resolve().serverEnv.PAPERCLIP_AGENT_JWT_SECRET, secret);
+
+  // A secret from the process environment wins and is not written to the file.
+  const inherited = resolve({ PAPERCLIP_AGENT_JWT_SECRET: "from-the-environment" });
+  assert.equal(inherited.serverEnv.PAPERCLIP_AGENT_JWT_SECRET, "from-the-environment");
+  assert.equal(readEnvFile(path.join(userData, ".env")).PAPERCLIP_AGENT_JWT_SECRET, secret);
+});
+
+test("an unpackaged run never writes a secret into the repository env file", () => {
+  const repo = makeRepo({ ...SOURCE_SERVER });
+  const config = resolveDesktopConfig({ env: {}, desktopDir: path.join(repo, "desktop") });
+  assert.equal(config.serverEnv.PAPERCLIP_AGENT_JWT_SECRET, undefined);
+  assert.equal(fs.existsSync(path.join(repo, ".paperclip", ".env")), false);
+});
