@@ -110,3 +110,29 @@ configuración (directorio de configuración propio sin credenciales copiadas, l
 Hallazgos: `assertSyncOperationsConfined` (guarda de seguridad) supone rutas POSIX a propósito, por lo que la sincronización de
 sandbox remoto no funciona desde un host Windows (13 tests omitidos en Windows). Falta aislar `isolatePersonalConfig` también en
 el carril ACP y activarlo en `setup.mjs` de la org. Siguen fallando en Windows muchos tests de codex/cursor/gemini/pi.
+
+## 8. App de escritorio: instalador de Windows (2026-11-22)
+- **Estado:** PR #31 (`worktree-desktop-installer` → `develop`, fork `enrik-0/clipclip`), **sin fusionar**. La CI
+  (`desktop-release.yml`, `windows-latest`) pasó en verde. Hecho: instalador NSIS, staging sin enlaces (`hoisted`), secreto JWT de los
+  agentes en el primer arranque, rutas de más de 260 caracteres, progreso y botón de detalles en el instalador, autoactualización desde
+  las GitHub Releases y el script `desktop/scripts/verify-installer.ps1`. Probado a mano: instalar, arrancar, UI, agentes de Claude (CLI) y
+  OpenCode cerrando tareas, desinstalar sin restos y la actualización 0.0.1 → 0.0.2 con un origen local.
+- **Hallazgos que no son del instalador (issues en el fork):** #32 el motor ACP de `claude_local` falla en Windows ("Raw agent command
+  strings are not supported", se evita con `engine=cli`); #33 el setup de un agente no se puede terminar con las credenciales locales del
+  CLI y el asistente no se puede cerrar. Además: Connectors muestra "API route not found" si no hay MCP público configurado, y los modelos
+  gratuitos de OpenCode tienen un límite de uso que se agota con las pruebas.
+- **Lecciones:**
+  - `pnpm deploy` crea los paquetes inyectados como **hardlinks** de los originales: escribir en ellos modifica el repositorio (romper el
+    enlace antes: `rm` y luego `write`).
+  - pnpm 9 y pnpm 10 calculan **hashes distintos** para el mismo parche: el lock de `desktop/` se escribe con el pnpm del repo (9.15.4).
+  - El archivo 7z del instalador **pierde los junctions** de pnpm y el extractor **omite en silencio** archivos con ruta > 260 caracteres.
+    `makensis` (32 bits) también tiene ese límite: `desktop/.npmrc` acorta los nombres del almacén de pnpm.
+  - `app.exit()` no emite el evento `quit`; `electron-updater` instala al salir en ese evento, así que la salida final usa `app.quit()`.
+  - `-c.compression=…` por línea de comandos no surte efecto en esta versión de electron-builder: la compresión va en la config y las
+    pruebas locales usan `ELECTRON_BUILDER_COMPRESSION_LEVEL=0`.
+- **Pendiente / decisiones abiertas:**
+  - Home y puerto propios para la versión instalada (hoy comparte el puerto 3100 y `~/.paperclip` con una instancia de desarrollo).
+  - Firma de código (SmartScreen avisa y el actualizador solo comprueba el `sha512`).
+  - Probar una actualización real a través de GitHub Releases y el clic en "Reiniciar para actualizar" (solo está cubierto por tests).
+  - El actualizador toma la última release del repositorio: no debe haber otras releases que no sean de la app de escritorio.
+  - Si se arregla #32, valorar el motor `cli` como valor por defecto en Windows.

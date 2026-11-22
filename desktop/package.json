@@ -5,17 +5,77 @@
   "description": "Windows desktop shell for a local Paperclip instance",
   "license": "MIT",
   "type": "module",
+  "packageManager": "pnpm@9.15.4",
   "main": "src/main.mjs",
   "scripts": {
     "start": "node node_modules/electron/install.js && electron .",
-    "test": "node --test \"src/**/*.test.mjs\""
+    "test": "node --test \"src/**/*.test.mjs\"",
+    "stage": "node scripts/stage-runtime.mjs",
+    "pack": "pnpm stage && electron-builder --dir",
+    "dist": "pnpm stage && electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "ai.paperclip.desktop",
+    "productName": "Paperclip Desktop",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "build/icon.png",
+      "!src/**/*.test.mjs",
+      "!src/__fixtures__/**"
+    ],
+    "extraResources": [
+      {
+        "from": "stage",
+        "to": "runtime",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "compression": "maximum",
+    "publish": {
+      "provider": "github",
+      "owner": "enrik-0",
+      "repo": "clipclip"
+    },
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Paperclip-Desktop-Setup-${version}.${ext}",
+      "include": "build/installer.nsh"
+    }
   },
   "devDependencies": {
-    "electron": "45.3.3"
+    "electron": "45.3.3",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
       "electron"
-    ]
+    ],
+    "patchedDependencies": {
+      "app-builder-lib@26.18.0": "patches/app-builder-lib@26.18.0.patch"
+    }
+  },
+  "dependencies": {
+    "electron-updater": "^6"
   }
 }

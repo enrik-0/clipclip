@@ -1,0 +1,160 @@
+name: Desktop Release
+
+# Builds the Windows installer for Paperclip Desktop (desktop/).
+#   - Run it by hand (workflow_dispatch) to get the installer as a build artifact.
+#   - Push a tag named desktop-vX.Y.Z to also publish it as a GitHub release.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Installer version, for example 0.1.0. Empty keeps the version in desktop/package.json.
+        required: false
+        type: string
+  # Build (but do not publish) on any branch that changes the desktop app or this
+  # workflow. GitHub only lets you run workflow_dispatch for a workflow that is on
+  # the default branch, so this is also how a branch gets its first run.
+  push:
+    branches:
+      - "**"
+    paths:
+      - "desktop/**"
+      - ".github/workflows/desktop-release.yml"
+    tags:
+      - "desktop-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-installer:
+    name: Windows installer
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      # The workspace build scripts use POSIX shell syntax (mkdir -p, cp -R).
+      # pnpm runs them through cmd.exe unless told otherwise.
+      GIT_BASH: C:\Program Files\Git\bin\bash.exe
+    steps:
+      # Generated artifacts (protocol manifest, catalogs) are hashed over LF
+      # text. A CRLF checkout makes their freshness checks fail.
+      - name: Keep LF line endings
+        shell: bash
+        run: git config --global core.autocrlf false
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          version="${{ inputs.version }}"
+          if [ -z "$version" ] && [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#desktop-v}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Installer version: ${version:-<from desktop/package.json>}"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # rust-toolchain.toml pins the channel the Runner binary is built with.
+      - name: Install pinned Rust toolchain
+        shell: bash
+        working-directory: packages/paperclip-runner
+        run: |
+          rustup toolchain install
+          rustup show active-toolchain
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/paperclip-runner/runner -> target
+          shared-key: desktop-windows-v1
+
+      - name: Install dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      # The Runner build identifies itself by the pid of its shell, which breaks
+      # under Git Bash on Windows. Build it with the default shell, then build
+      # everything else with Git Bash.
+      - name: Build Runner
+        shell: cmd
+        run: pnpm --filter @paperclipai/paperclip-runner build
+
+      - name: Build server and UI
+        shell: bash
+        env:
+          npm_config_script_shell: ${{ env.GIT_BASH }}
+        run: pnpm -r --filter '!@paperclipai/paperclip-runner' build
+
+      - name: Install desktop dependencies
+        shell: bash
+        working-directory: desktop
+        run: pnpm install --ignore-workspace --frozen-lockfile
+
+      - name: Test desktop shell
+        shell: bash
+        working-directory: desktop
+        run: pnpm test
+
+      - name: Stage runtime
+        shell: bash
+        working-directory: desktop
+        run: pnpm stage
+
+      # Maximum compression comes from "compression" in desktop/package.json. It
+      # is slow, which is why developers build without it (see desktop/README.md).
+      # Installed apps update themselves from this repository's GitHub releases.
+      # The owner and repository are read from the workflow run, so a fork or a
+      # moved repository publishes to itself. The version comes from the tag:
+      # the updater installs a release only when its version is newer.
+      - name: Build installer
+        shell: bash
+        working-directory: desktop
+        run: |
+          if [ -n "${{ steps.version.outputs.version }}" ]; then
+            npm pkg set version="${{ steps.version.outputs.version }}"
+          fi
+          npm pkg set build.publish.owner="${GITHUB_REPOSITORY_OWNER}" build.publish.repo="${GITHUB_REPOSITORY#*/}"
+          node node_modules/electron-builder/cli.js --win nsis --publish never
+          # latest.yml is what the updater reads. Fail here if it is missing.
+          test -f release/latest.yml
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: paperclip-desktop-windows
+          path: |
+            desktop/release/*Setup*.exe
+            desktop/release/*.blockmap
+            desktop/release/latest.yml
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Paperclip Desktop ${GITHUB_REF_NAME#desktop-v}" \
+            --generate-notes \
+            desktop/release/*Setup*.exe \
+            desktop/release/*.blockmap \
+            desktop/release/latest.yml
