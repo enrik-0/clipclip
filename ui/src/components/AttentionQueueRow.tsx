@@ -516,7 +516,10 @@ function CompactDecisionActions({
         queryClient.invalidateQueries({ queryKey: queryKeys.access.joinRequests(companyId) });
       }
       pushToast({
-        title: compactDecisionSuccessLabel(item.sourceKind, action),
+        title: compactDecisionSuccessLabel(item, action),
+        body: decidesToolAction(item) && action === "request_revision"
+          ? "The action was declined and will not run. The agent gets the reason and can try another way."
+          : undefined,
         tone: "success",
       });
     },
@@ -560,13 +563,23 @@ function CompactDecisionActions({
   );
 }
 
+/**
+ * A tool gateway approval decides a tool action. The agent cannot revise a tool
+ * call in place, so the server declines the action on a revision request.
+ */
+function decidesToolAction(item: AttentionItem): boolean {
+  return item.sourceKind === "approval" && item.subject.metadata?.decidesToolAction === true;
+}
+
 function decisionLabel(action: CompactDecisionAction): string {
   if (action === "request_revision") return "sent for revision";
   if (action === "accept" || action === "approve") return "approved";
   return "rejected";
 }
 
-function compactDecisionSuccessLabel(sourceKind: AttentionItem["sourceKind"], action: CompactDecisionAction): string {
+function compactDecisionSuccessLabel(item: AttentionItem, action: CompactDecisionAction): string {
+  const sourceKind = item.sourceKind;
+  if (decidesToolAction(item) && action === "request_revision") return "Changes requested";
   if (sourceKind === "approval") return `Approval ${decisionLabel(action)}`;
   if (sourceKind === "join_request") return `Join request ${decisionLabel(action)}`;
   return action === "accept" ? "Confirmation accepted" : "Confirmation declined";

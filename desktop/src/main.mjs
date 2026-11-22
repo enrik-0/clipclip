@@ -3,15 +3,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, Menu, Tray, nativeImage, shell } from "electron";
 import { resolveDesktopConfig } from "./config.mjs";
+import { handleLaunch, secondInstanceAction } from "./launch.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
-import { statusPageUrl } from "./status-page.mjs";
+import { formatExitCode, statusPageUrl } from "./status-page.mjs";
 import { createUpdater } from "./updater.mjs";
 
 const srcDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.join(srcDir, "..");
 const LOG_TAIL_CHARS = 6000;
 const LOG_ROTATE_BYTES = 5 * 1024 * 1024;
-const startHidden = process.argv.includes("--hidden");
 
 app.setName("Paperclip Desktop");
 if (process.platform === "win32") app.setAppUserModelId("ai.paperclip.desktop");
@@ -33,6 +33,8 @@ let tray = null;
 let supervisor = null;
 let serverUrl = null;
 let serverOwned = false;
+// False when the app attached to a server that serves no board UI (API-only).
+let serverUi = false;
 let logStream = null;
 let logTail = "";
 let quitting = false;
@@ -79,6 +81,27 @@ function openExternally(url) {
 
 function showStatus(page) {
   if (mainWindow && !mainWindow.isDestroyed()) void mainWindow.loadURL(statusPageUrl(page));
+}
+
+function noUiPage() {
+  return {
+    title: "El servidor encontrado no muestra la interfaz",
+    detail:
+      `Hay un servidor de Paperclip en ${serverUrl}, pero funciona solo como API: no tiene la interfaz compilada ` +
+      "ni el middleware de Vite. La app se ha conectado a él y no lo detendrá al salir. " +
+      'Opciones: detén ese servidor y usa "Reiniciar servidor" en el icono de la bandeja para que la app arranque el ' +
+      'suyo; arráncalo de nuevo con la interfaz (por ejemplo, con "pnpm dev"); o usa "Abrir la API en el navegador".',
+  };
+}
+
+/** Loads the server UI, or explains why there is none to load. */
+function loadServer() {
+  if (!mainWindow || mainWindow.isDestroyed() || !serverUrl) return Promise.resolve();
+  if (!serverUi) {
+    showStatus(noUiPage());
+    return Promise.resolve();
+  }
+  return mainWindow.loadURL(serverUrl);
 }
 
 function showWindow() {
@@ -130,7 +153,7 @@ function createWindow() {
     mainWindow = null;
   });
 
-  if (serverUrl) void mainWindow.loadURL(serverUrl);
+  void loadServer();
 }
 
 function updateMenuItems() {
@@ -186,14 +209,16 @@ function buildTrayMenu() {
   return Menu.buildFromTemplate([
     { label: "Abrir Paperclip", click: showWindow },
     {
-      label: "Abrir en el navegador",
+      label: serverUi || serverUrl === null ? "Abrir en el navegador" : "Abrir la API en el navegador",
       enabled: serverUrl !== null,
-      click: () => serverUrl && openExternally(serverUrl),
+      click: () => serverUrl && openExternally(serverUi ? serverUrl : `${serverUrl}/api/health`),
     },
     { type: "separator" },
     {
       label: "Reiniciar servidor",
-      enabled: serverOwned || serverUrl === null,
+      // Without a UI, restarting probes again: if that server was stopped, the
+      // app starts its own.
+      enabled: serverOwned || serverUrl === null || !serverUi,
       click: () => void restartServer(),
     },
     {
@@ -215,7 +240,9 @@ function refreshTray() {
   if (!tray) return;
   tray.setContextMenu(buildTrayMenu());
   tray.setToolTip(
-    serverUrl ? `Paperclip — ${serverUrl}${serverOwned ? "" : " (servidor externo)"}` : "Paperclip — sin servidor",
+    serverUrl
+      ? `Paperclip — ${serverUrl}${serverOwned ? "" : " (servidor externo)"}${serverUi ? "" : " (sin interfaz)"}`
+      : "Paperclip — sin servidor",
   );
 }
 
@@ -231,6 +258,7 @@ function createTray() {
 async function startServer() {
   serverUrl = null;
   serverOwned = false;
+  serverUi = false;
   refreshTray();
   showStatus({
     title: "Iniciando Paperclip…",
@@ -245,10 +273,11 @@ async function startServer() {
     onUnexpectedExit: ({ code, signal }) => {
       serverUrl = null;
       serverOwned = false;
+      serverUi = false;
       refreshTray();
       showStatus({
         title: "El servidor de Paperclip se ha detenido",
-        detail: `Salió de forma inesperada (código ${code ?? "ninguno"}, señal ${signal ?? "ninguna"}). Usa "Reiniciar servidor" en el icono de la bandeja.`,
+        detail: `Salió de forma inesperada (código ${formatExitCode(code)}, señal ${signal ?? "ninguna"}). Usa "Reiniciar servidor" en el icono de la bandeja.`,
         log: logTail,
       });
       showWindow();
@@ -259,9 +288,12 @@ async function startServer() {
     const result = await supervisor.start();
     serverUrl = result.url;
     serverOwned = result.owned;
-    appendLog(`[desktop] ${result.owned ? "started" : "attached to"} server at ${result.url}\n`);
+    serverUi = result.ui;
+    appendLog(
+      `[desktop] ${result.owned ? "started" : "attached to"} server at ${result.url}${result.ui ? "" : " (no UI at /)"}\n`,
+    );
     refreshTray();
-    if (mainWindow && !mainWindow.isDestroyed()) await mainWindow.loadURL(serverUrl);
+    await loadServer();
   } catch (error) {
     appendLog(`[desktop] server start failed: ${error?.message ?? error}\n`);
     refreshTray();
@@ -280,13 +312,11 @@ async function restartServer() {
   await startServer();
 }
 
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
-} else {
+function startApp({ hidden }) {
   // Launching the app again focuses the running one; `--quit` asks it to shut
   // down instead, which gives scripts a way to stop the server cleanly.
   app.on("second-instance", (_event, argv) => {
-    if (argv.includes("--quit")) app.quit();
+    if (secondInstanceAction(argv) === "quit") app.quit();
     else showWindow();
   });
 
@@ -320,11 +350,21 @@ if (!app.requestSingleInstanceLock()) {
   // finished loading, so awaiting it here would never resolve.
   void app.whenReady().then(async () => {
     const logFile = openLogStream();
-    appendLog(`[desktop] repo ${config.repoRoot}, mode ${config.serverMode ?? "none"}, log ${logFile}\n`);
+    appendLog(`[desktop] repo ${config.repoRoot}, mode ${config.serverMode ?? "none"}, log ${logFile}
+`);
     createTray();
     createWindow();
-    if (!startHidden) showWindow();
+    if (!hidden) showWindow();
     await startServer();
     await startUpdater();
   });
 }
+
+handleLaunch({
+  argv: process.argv,
+  requestLock: () => app.requestSingleInstanceLock(),
+  quit: () => app.quit(),
+  exit: (code) => app.exit(code),
+  start: startApp,
+  log: (text) => process.stderr.write(text),
+});

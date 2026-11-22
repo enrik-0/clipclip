@@ -100,6 +100,7 @@ import {
 } from "@/pages/apps/app-connect-policy";
 import { parseGoogleSheetIds } from "@/pages/apps/google-sheets";
 import { connectionNameForGrantKind } from "@/pages/apps/connection-identity";
+import { defaultGalleryConnectionName } from "./connection-default-name";
 import {
   canSubmitGenericConnect,
   customHeaderError,
@@ -1482,8 +1483,11 @@ function StandardConnectionSetupFlow({
           ? parseGoogleSheetIds(googleSheetsLinks).ids
           : [];
         const trimmedGalleryName = galleryName.trim();
+        // The picker stores the app name; a resumed setup stores its saved name.
         const connectionName = connectionNameForGrantKind(
-          trimmedGalleryName || connectEntry.name,
+          trimmedGalleryName && trimmedGalleryName !== connectEntry.name
+            ? trimmedGalleryName
+            : defaultGalleryConnectionName(connectEntry, configValues),
           requestedGrantKind,
         );
         result = await toolsApi.connectApp(selectedCompanyId!, {
@@ -2209,12 +2213,13 @@ function StandardConnectionSetupFlow({
   // PAP-659 C0: the resolved default is stated, not asked. `Change` opens the
   // same controls the deleted Access step owned, inline and never blocking.
   const renderConnectionDefaults = step === "key" ? (
-    (extra?: ReactNode, forceOpen?: boolean) => (
+    (extra?: ReactNode, forceOpen?: boolean, choices?: ReactNode) => (
     <>
     <ConnectionAccessDefaults
       key="connection-defaults"
       extra={extra}
       forceOpen={forceOpen}
+      choices={choices}
       companyId={selectedCompanyId}
       sentence={connectionDefaultSummarySentence({
         grantKind: effectiveGrantKind,
@@ -2841,7 +2846,8 @@ function StandardConnectionSetupFlow({
 
       {step === "success" && (
         <ConnectionSetupCompletionScreen
-          appName={appName}
+          // An app can hold several connections; name the one this setup made.
+          appName={connectResult?.connection?.name || appName}
           logoUrl={entry?.branding.logoUrl}
           darkLogoUrl={entry?.branding.darkLogoUrl}
           summary={accessSummaryLines({
@@ -3717,7 +3723,7 @@ function KeyStep({
    * Builds the one Advanced disclosure this screen has (PAP-659 C0). The key
    * step contributes its own settings to it rather than opening a second one.
    */
-  renderDefaults?: (extra?: ReactNode, forceOpen?: boolean) => ReactNode;
+  renderDefaults?: (extra?: ReactNode, forceOpen?: boolean, choices?: ReactNode) => ReactNode;
   onBack: () => void;
   onConnect: () => void;
 }) {
@@ -3914,7 +3920,17 @@ function KeyStep({
       ) : null}
     </div>
   ) : null;
-  const defaults = renderDefaults?.(advancedSettings, forceAdvancedOpen) ?? null;
+  // A read-only switch decides what agents can do, so its current value stays
+  // on the form while the switch itself sits under Change.
+  const readOnlyField = advancedConfigFields.find((field) => field.key === "readOnly" && field.type === "checkbox");
+  const accessChoices = readOnlyField ? (
+    <p data-testid="connection-access-mode" className="text-sm text-foreground">
+      {configValues[readOnlyField.key] === true
+        ? `Read only: agents cannot make changes. To allow changes, select Change and turn off ${readOnlyField.label}.`
+        : `Read and write. To let agents only read, select Change and turn on ${readOnlyField.label}.`}
+    </p>
+  ) : undefined;
+  const defaults = renderDefaults?.(advancedSettings, forceAdvancedOpen, accessChoices) ?? null;
 
   if (isGoogleSheetsRobotMethod(entry, method)) {
     const parsed = parseGoogleSheetIds(googleSheetsLinks);
@@ -4257,7 +4273,7 @@ function MethodConfigField({
           <div className="text-sm font-medium text-foreground">{field.label}</div>
           {field.helperMd && <div className="mt-1 text-xs text-muted-foreground">{field.helperMd}</div>}
         </div>
-        <ToggleSwitch checked={value === true} onCheckedChange={onChange} />
+        <ToggleSwitch checked={value === true} onCheckedChange={onChange} aria-label={field.label} />
       </div>
     );
   }
@@ -4652,6 +4668,7 @@ export function ConnectionAccessDefaults({
   notice,
   extra,
   forceOpen = false,
+  choices,
   disabled = false,
   ...accessProps
 }: Omit<Parameters<typeof AccessStepContent>[0], "agents" | "agentsLoading" | "submitLabel" | "onBack" | "onContinue" | "pending" | "continuesToProvider" | "hideFooter" | "bare"> & {
@@ -4673,6 +4690,8 @@ export function ConnectionAccessDefaults({
   extra?: ReactNode;
   /** Something inside is load-bearing right now, so do not hide it. */
   forceOpen?: boolean;
+  /** Current values of choices inside the disclosure that must stay visible while it is closed. */
+  choices?: ReactNode;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -4690,6 +4709,7 @@ export function ConnectionAccessDefaults({
           Change
         </Button></CollapsibleTrigger>
       </div>
+      {choices ? <div className="mt-2">{choices}</div> : null}
       {(notice ?? []).map((reason) => (
         <p key={reason} className="mt-2 text-xs text-muted-foreground">{reason}</p>
       ))}

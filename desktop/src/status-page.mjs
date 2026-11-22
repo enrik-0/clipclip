@@ -6,12 +6,31 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
+// CSI (`ESC[` ... final byte, which covers SGR colours), OSC (`ESC]` ... BEL
+// or ESC\), and the remaining two-character escapes.
+const ANSI_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g;
+
+/** Removes terminal escape sequences, so a server log reads as plain text. */
+export function stripAnsi(text) {
+  return String(text).replace(ANSI_PATTERN, "");
+}
+
+/**
+ * Exit code for display. Windows reports some codes as unsigned 32-bit values
+ * (4294967295 is -1), so they are shown signed. No code is "desconocido".
+ */
+export function formatExitCode(code) {
+  if (typeof code !== "number" || !Number.isFinite(code)) return "desconocido";
+  return String(code > 0x7fffffff && code <= 0xffffffff ? code - 0x1_0000_0000 : code);
+}
+
 /**
  * Builds the local page shown while the server is starting, stopping, or has
  * failed. It is loaded as a data URL, so it needs no file access and runs no
- * script.
+ * script. Escape sequences in `log` are removed for display only.
  */
 export function statusPageUrl({ title, detail = "", log = "", busy = false }) {
+  log = stripAnsi(log);
   const html = `<!doctype html>
 <html lang="es">
 <head>

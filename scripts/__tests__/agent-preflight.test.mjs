@@ -3,7 +3,8 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync,
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { PLUGIN_SDK_BUILD_MARKERS, pluginSdkBuildStep } from "../agent-preflight.mjs";
+import { spawnSync } from "node:child_process";
+import { binaryFileName, commandInvocation, PLUGIN_SDK_BUILD_MARKERS, pluginSdkBuildStep } from "../agent-preflight.mjs";
 
 // A worktree with the real ensure-plugin-build-deps script and a stand-in
 // compiler that emits dist/index.js next to the tsconfig it is given.
@@ -19,7 +20,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const target = path.dirname(process.argv[3]);
 if (fs.existsSync("fail")) process.exit(2);
-fs.appendFileSync("builds", path.relative(process.cwd(), target) + "\\n");
+fs.appendFileSync("builds", path.relative(process.cwd(), target).split(path.sep).join("/") + "\\n");
 fs.mkdirSync(path.join(target, "dist"), { recursive: true });
 fs.writeFileSync(path.join(target, "dist/index.js"), "export {};\\n");
 `);
@@ -71,4 +72,31 @@ test("a failed build fails the preflight", t => {
 test("a build that reports success without its outputs fails the preflight", t => {
   const { root } = worktree(t);
   assert.throws(() => pluginSdkBuildStep(root, () => 0), /no completion marker/);
+});
+
+test("on Windows, pnpm runs through the shell because it is a .cmd shim (#19)", () => {
+  assert.deepEqual(commandInvocation("pnpm", ["install", "--frozen-lockfile"], "win32"),
+    { command: "pnpm", args: ["install", "--frozen-lockfile"], shell: true });
+  assert.deepEqual(commandInvocation("pnpm", ["--filter", "a b", 'say "hi"'], "win32").args,
+    ["--filter", '"a b"', '"say ""hi"""']);
+});
+
+test("other commands and other platforms spawn directly", () => {
+  assert.deepEqual(commandInvocation("cargo", ["build"], "win32"), { command: "cargo", args: ["build"], shell: false });
+  assert.deepEqual(commandInvocation("pnpm", ["install"], "linux"), { command: "pnpm", args: ["install"], shell: false });
+  assert.equal(commandInvocation(process.execPath, ["x.mjs"], "win32").shell, false);
+});
+
+test("debug binaries carry the .exe suffix only on Windows", () => {
+  assert.equal(binaryFileName("paperclip-runnerd", "win32"), "paperclip-runnerd.exe");
+  assert.equal(binaryFileName("paperclip-runnerd", "linux"), "paperclip-runnerd");
+  assert.equal(binaryFileName("paperclip-runnerd", "darwin"), "paperclip-runnerd");
+});
+
+test("pnpm can be started on this platform", () => {
+  const { command, args, shell } = commandInvocation("pnpm", ["--version"]);
+  const result = spawnSync(command, args, { encoding: "utf8", shell });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0);
+  assert.match(result.stdout.trim(), /^\d+\.\d+\.\d+/);
 });

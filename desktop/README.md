@@ -58,9 +58,12 @@ En Windows, `pnpm build` de la raíz necesita Git Bash como shell de scripts
 ## Comportamiento
 
 - **Servidor propio o externo.** Si ya hay un Paperclip respondiendo en la URL esperada, la app se conecta a él y no lo
-  detiene al salir. Si no, lo arranca ella y lo apaga de forma ordenada al salir.
+  detiene al salir. Si no, lo arranca ella y lo apaga de forma ordenada al salir. Si el servidor encontrado no sirve la
+  interfaz (modo solo API, como `pnpm dev:server` sin UI compilada), la ventana lo explica en vez de cargar su página
+  de error.
 - **Cerrar la ventana no cierra la app.** Se oculta en la bandeja y los agentes siguen trabajando. Para terminar, usa
-  "Salir" en el icono de la bandeja o ejecuta `pnpm start -- --quit`.
+  "Salir" en el icono de la bandeja o ejecuta `pnpm start -- --quit`. Un proceso lanzado con `--quit` nunca arranca la
+  app: si no hay ninguna instancia en marcha, termina enseguida con el código 2.
 - **Instancia única.** Lanzarla otra vez trae la ventana existente al frente.
 - **Iniciar con Windows.** Opción del menú de la bandeja; arranca oculta (`--hidden`).
 - **Enlaces externos** se abren en el navegador del sistema.
@@ -112,6 +115,8 @@ variables de entorno del usuario.
 - `src/server-supervisor.mjs`: arranca, detecta y detiene el servidor.
 - `src/server-host.mjs`: proceso Node que aloja el servidor y recibe la orden de apagado por IPC, porque Windows no
   puede enviar `SIGTERM` a un proceso hijo.
+- `src/launch.mjs`: decide qué hace un proceso recién lanzado (arrancar, ceder a la instancia en marcha o salir con
+  `--quit`).
 - `src/config.mjs`: resolución de rutas y entorno.
 - `src/updater.mjs`: autoactualización (estado y comprobaciones; el actualizador se inyecta para poder probarlo).
 - `src/status-page.mjs`: página local de carga y de error.

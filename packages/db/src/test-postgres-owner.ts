@@ -15,6 +15,14 @@ export type TestPostgresInstance = {
 type Owner = { stop(clean?: boolean): Promise<void>; interrupt(): void };
 export class TestPostgresShutdownError extends Error {}
 const owners = new Set<Owner>();
+// On POSIX an immediate shutdown (SIGQUIT) ends every backend at once. Windows
+// has no real signals: a backend that is busy, for example a checkpointer in a
+// long fsync, only sees the request when it polls for it. The postmaster then
+// waits 5 seconds (SIGKILL_CHILDREN_AFTER_SECS) before it kills the remaining
+// children and exits. Wait longer than that on Windows.
+function immediateShutdownExitTimeoutMs(): number {
+  return process.platform === "win32" ? 15_000 : 5_000;
+}
 type ShutdownTask = { stop(signal: NodeJS.Signals): Promise<void>; interrupt(): void; afterStop?(): Promise<void> };
 const shutdownTasks = new Set<ShutdownTask>();
 let shuttingDown = false;
@@ -155,7 +163,7 @@ export function ownTestPostgres(instance: TestPostgresInstance, dataDir?: string
               if (clean) throw new TestPostgresShutdownError("Test PostgreSQL did not complete clean shutdown; the template cannot be published");
               usedImmediateShutdown = true;
               await requestStop(child, "immediate", false);
-              if (!await settlesWithin(exited, 5_000)) {
+              if (!await settlesWithin(exited, immediateShutdownExitTimeoutMs())) {
                 throw new TestPostgresShutdownError("Test PostgreSQL did not exit after fast and immediate shutdown; its data directory is retained");
               }
             }

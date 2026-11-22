@@ -26,12 +26,20 @@ end cover 24 hours.
 
 | Work | `defer_automatic` | `defer_all` |
 | --- | --- | --- |
-| Monitors, scheduled retries, routines, assignments and recovery wakes | Waits | Waits |
+| Monitors, scheduled retries, scheduled routines and recovery wakes | Waits | Waits |
+| An assignment by an agent, or by a routine that runs on its schedule | Waits | Waits |
+| An assignment by a person, such as a task a board user creates for an agent | Starts | Waits |
 | A wake a person asked for, such as a board comment | Starts | Waits |
 | A manual run (**Run now**) by a board user | Starts | Starts |
 | A conversation turn | Starts | Starts |
 | A run that already started | Finishes its turn | Finishes its turn |
 | A periodic timer check | Skipped | Skipped |
+
+An assignment wake takes the actor of the request that made the assignment. A
+wake is "asked for by a person" when that actor is a user. A routine that a
+board user runs by hand creates its task as that user, so its assignment starts
+in `defer_automatic`. In `defer_all`, only a manual run is exempt, so every
+assignment waits.
 
 A waiting run is cancelled before any workspace or provider work with the code
 `activity_hours_wait`. Its retry is scheduled for the window opening plus a

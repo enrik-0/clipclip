@@ -37,12 +37,12 @@ describe("server package build script", () => {
     const buildScript = packageJson.scripts?.build ?? "";
 
     expect(buildScript).toContain(
-      "mkdir -p dist/onboarding-assets dist/built-ins",
+      "node ../scripts/fsx.mjs mkdir dist/onboarding-assets dist/built-ins",
     );
     expect(buildScript).toContain(
-      "cp -R src/onboarding-assets/. dist/onboarding-assets/",
+      "node ../scripts/fsx.mjs cp -R src/onboarding-assets/. dist/onboarding-assets/",
     );
-    expect(buildScript).toContain("cp -R src/built-ins/. dist/built-ins/");
+    expect(buildScript).toContain("node ../scripts/fsx.mjs cp -R src/built-ins/. dist/built-ins/");
   });
 
   it("vendors the private runner runtime without a production workspace dependency", () => {
@@ -70,7 +70,7 @@ describe("server package build script", () => {
     );
     expect(packageJson.scripts?.build.startsWith("pnpm run prepare:runner-vendor && ")).toBe(true);
     expect(packageJson.scripts?.build).toContain(
-      "cp -Rf ../packages/paperclip-runner/dist/. dist/vendor/paperclip-runner/",
+      "node ../scripts/fsx.mjs cp -Rf ../packages/paperclip-runner/dist/. dist/vendor/paperclip-runner/",
     );
   });
 
@@ -96,7 +96,11 @@ describe("server package build script", () => {
     const step = packageJson.scripts.build.split(" && ").find((command: string) =>
       command.includes("../packages/paperclip-runner/dist/."));
     expect(step).toBeDefined();
-    const [command, ...args] = step.split(" ");
+    // The step runs the repository's fsx helper; resolve it from the real
+    // server directory because the scratch tree below has no scripts folder.
+    const [command, helper, ...args] = step.split(" ");
+    expect(command).toBe("node");
+    const helperPath = fileURLToPath(new URL(`../../${helper}`, import.meta.url));
     const root = mkdtempSync(path.join(tmpdir(), "runner-vendor-copy-"));
     try {
       const relative = "remote-provider-packs/linux-x64/provider-pack.json";
@@ -106,7 +110,7 @@ describe("server package build script", () => {
       mkdirSync(path.dirname(destination), { recursive: true });
       writeFileSync(source, "qualified image identity", { mode: 0o444 });
       writeFileSync(destination, "previous image identity", { mode: 0o444 });
-      execFileSync(command, args, { cwd: path.join(root, "server") });
+      execFileSync(process.execPath, [helperPath, ...args], { cwd: path.join(root, "server") });
       expect(readFileSync(destination, "utf8")).toBe("qualified image identity");
     } finally {
       rmSync(root, { recursive: true, force: true });

@@ -130,7 +130,7 @@ const support = external ? { supported: true } : await getEmbeddedPostgresTestSu
     const remote = vi.fn(async () => { throw new Error("Review must not invoke the provider"); });
     const gateway = createToolGatewayService(db, { toolActionSigningSecret: "milestone-review-fixture", remoteHttpRequest: remote });
     const session = await gateway.createSession({ companyId: f.companyId, agentId: f.agentId, runId });
-    await expect(gateway.executeTool({ sessionToken: session.token, tool: "mcp-remote-fixture:update_note", parameters: { noteId: "test" } }))
+    await expect(gateway.executeTool({ sessionToken: session.token, tool: "mcp-remote-fixture:update_note", parameters: { noteId: "test", body: "review me" } }))
       .rejects.toMatchObject({ reasonCode: "approval_required" });
     const [request] = await db.select().from(toolActionRequests).where(eq(toolActionRequests.companyId, f.companyId));
     expect(request.interactionId).toBeTruthy();

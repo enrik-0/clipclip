@@ -54,7 +54,7 @@ const routeModules = hoistModuleGraph(registerModuleMocks, async () => {
   return { errorHandler, approvalRoutes };
 });
 
-async function createApp(actorOverrides: Record<string, unknown> = {}) {
+async function createApp(actorOverrides: Record<string, unknown> = {}, routeOptions: Record<string, unknown> = {}) {
   const { errorHandler, approvalRoutes } = routeModules.value;
   const app = express();
   app.use(express.json());
@@ -69,7 +69,7 @@ async function createApp(actorOverrides: Record<string, unknown> = {}) {
     };
     next();
   });
-  app.use("/api", approvalRoutes(createRouteDb()));
+  app.use("/api", approvalRoutes(createRouteDb(), routeOptions));
   app.use(errorHandler);
   return app;
 }
@@ -199,6 +199,108 @@ describe("approval routes idempotent retries", () => {
 
     expect(res.status).toBe(200);
     expect(mockLogActivity).not.toHaveBeenCalled();
+  });
+
+  it.each(["approve", "reject"] as const)("lets the owning module %s a tool action approval in one decision (#9)", async (verb) => {
+    const pending = {
+      id: "approval-tool",
+      companyId: "company-1",
+      type: "request_board_approval",
+      status: "pending",
+      payload: { source: "tool_gateway", actionRequestId: "request-1" },
+      requestedByAgentId: "agent-1",
+    };
+    const decided = { ...pending, status: verb === "approve" ? "approved" : "rejected" };
+    mockApprovalService.getById.mockResolvedValueOnce(pending).mockResolvedValue(decided);
+    const handler = {
+      handles: vi.fn((approval: { payload: Record<string, unknown> }) => approval.payload.source === "tool_gateway"),
+      decide: vi.fn(async () => {}),
+    };
+
+    const res = await request(await createApp({}, { decisionHandlers: [handler] }))
+      .post(`/api/approvals/approval-tool/${verb}`)
+      .send({ decisionNote: "checked" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe(decided.status);
+    expect(handler.decide).toHaveBeenCalledExactlyOnceWith({
+      approval: pending,
+      decision: verb === "approve" ? "approved" : "rejected",
+      decidedByUserId: "user-1",
+      decisionNote: "checked",
+    });
+    // The owner resolves the approval, logs it and wakes the agent after the action ran.
+    expect(mockApprovalService.approve).not.toHaveBeenCalled();
+    expect(mockApprovalService.reject).not.toHaveBeenCalled();
+    expect(mockHeartbeatService.wakeup).not.toHaveBeenCalled();
+  });
+
+  it("lets the owning module decide a revision request on a tool action approval (#24)", async () => {
+    const pending = {
+      id: "approval-tool",
+      companyId: "company-1",
+      type: "request_board_approval",
+      status: "pending",
+      payload: { source: "tool_gateway", actionRequestId: "request-1" },
+      requestedByAgentId: "agent-1",
+    };
+    const decided = { ...pending, status: "rejected", decisionNote: "Use the archive tool" };
+    mockApprovalService.getById.mockResolvedValueOnce(pending).mockResolvedValue(decided);
+    const handler = {
+      handles: vi.fn((approval: { payload: Record<string, unknown> }) => approval.payload.source === "tool_gateway"),
+      decide: vi.fn(async () => {}),
+    };
+
+    const res = await request(await createApp({}, { decisionHandlers: [handler] }))
+      .post("/api/approvals/approval-tool/request-revision")
+      .send({ decisionNote: "Use the archive tool" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("rejected");
+    expect(handler.decide).toHaveBeenCalledExactlyOnceWith({
+      approval: pending,
+      decision: "revision_requested",
+      decidedByUserId: "user-1",
+      decisionNote: "Use the archive tool",
+    });
+    // The owner resolves both records and logs them; the route adds nothing.
+    expect(mockApprovalService.requestRevision).not.toHaveBeenCalled();
+    expect(mockLogActivity).not.toHaveBeenCalled();
+  });
+
+  it("keeps the default revision flow for approvals without an owner (#24)", async () => {
+    const approval = { id: "approval-1", companyId: "company-1", type: "request_board_approval", status: "pending", payload: {} };
+    mockApprovalService.getById.mockResolvedValue(approval);
+    mockApprovalService.requestRevision.mockResolvedValue({ ...approval, status: "revision_requested" });
+    const handler = { handles: vi.fn(() => false), decide: vi.fn() };
+
+    const res = await request(await createApp({}, { decisionHandlers: [handler] }))
+      .post("/api/approvals/approval-1/request-revision")
+      .send({ decisionNote: "Need changes" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("revision_requested");
+    expect(handler.decide).not.toHaveBeenCalled();
+    expect(mockApprovalService.requestRevision).toHaveBeenCalledExactlyOnceWith("approval-1", "user-1", "Need changes");
+    expect(mockLogActivity).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: "approval.revision_requested", entityId: "approval-1" }),
+    );
+  });
+
+  it("keeps the default approval flow for approvals without an owner (#9)", async () => {
+    const approval = { id: "approval-1", companyId: "company-1", type: "hire_agent", status: "pending", payload: {}, requestedByAgentId: null };
+    mockApprovalService.getById.mockResolvedValue(approval);
+    mockApprovalService.approve.mockResolvedValue({ approval: { ...approval, status: "approved" }, applied: true });
+    const handler = { handles: vi.fn(() => false), decide: vi.fn() };
+
+    const res = await request(await createApp({}, { decisionHandlers: [handler] }))
+      .post("/api/approvals/approval-1/approve")
+      .send({});
+
+    expect(res.status).toBe(200);
+    expect(handler.decide).not.toHaveBeenCalled();
+    expect(mockApprovalService.approve).toHaveBeenCalledTimes(1);
   });
 
   it("rejects approval decisions for companies outside the caller scope", async () => {

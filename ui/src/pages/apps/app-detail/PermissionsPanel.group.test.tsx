@@ -69,4 +69,38 @@ describe("Permissions group control", () => {
     expect([...ids].sort()).toEqual(["delete", "label", "send"]);
     expect(next).toBe("ask");
   });
+
+  it("shows why an action is suggested for Ask first (#11)", () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    flushSync(() =>
+      root.render(
+        <QueryClientProvider client={new QueryClient()}>
+          <MemoryRouter>
+            <ActionsSection
+              connectionId="conn-1"
+              appName="Obsidian"
+              readOnly={[]}
+              canChange={[entry("patch_note", "write"), entry("write_note", "write")]}
+              quarantined={[]}
+              enabledIds={new Set(["patch_note", "write_note"])}
+              askFirstIds={new Set(["patch_note"])}
+              askFirstReasons={new Map([["patch_note", "Patch note can remove text from a note."]])}
+              disabled={false}
+              refreshPending={false}
+              canConfigure
+              onSetPermission={vi.fn()}
+              onReviewQuarantined={vi.fn()}
+              onRefreshActions={vi.fn()}
+            />
+          </MemoryRouter>
+        </QueryClientProvider>,
+      ),
+    );
+
+    const patchRow = container.querySelector('[data-action-id="patch_note"]');
+    expect(patchRow?.textContent).toContain("Suggested: Ask first. Patch note can remove text from a note.");
+    expect(container.querySelector('[data-action-id="write_note"]')?.textContent).not.toContain("Suggested");
+  });
 });

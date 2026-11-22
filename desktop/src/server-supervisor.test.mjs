@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { createServerSupervisor, localUrlFor, probeServer } from "./server-supervisor.mjs";
+import { createServerSupervisor, localUrlFor, probeServer, probeUi } from "./server-supervisor.mjs";
 
 const srcDir = path.dirname(fileURLToPath(import.meta.url));
 const fakeHost = path.join(srcDir, "__fixtures__", "fake-host.mjs");
@@ -66,10 +66,41 @@ test("attaches to a server that is already running and never stops it", async ()
       hostScript: fakeHost,
     });
     const attached = await visitor.start();
-    assert.deepEqual(attached, { url: running.url, owned: false });
+    assert.deepEqual(attached, { url: running.url, owned: false, ui: true });
     assert.equal(visitor.isOwned(), false);
     await visitor.stop();
     assert.equal(await probeServer(running.url), true);
+  } finally {
+    await owner.stop();
+  }
+});
+
+test("probeUi accepts only an HTML page that is not an error", async () => {
+  const page = (status, contentType) => async (url) => {
+    assert.equal(url, "http://x/");
+    return { ok: status < 400, status, headers: new Headers({ "content-type": contentType }) };
+  };
+  assert.equal(await probeUi("http://x", { fetchImpl: page(200, "text/html; charset=utf-8") }), true);
+  assert.equal(await probeUi("http://x", { fetchImpl: page(404, "text/html; charset=utf-8") }), false);
+  assert.equal(await probeUi("http://x", { fetchImpl: page(200, "application/json") }), false);
+  const unreachable = async () => {
+    throw new Error("ECONNREFUSED");
+  };
+  assert.equal(await probeUi("http://x", { fetchImpl: unreachable }), false);
+});
+
+test("reports no UI when it attaches to a server whose root is 404", async () => {
+  const owner = createServerSupervisor({ config: configFor("api-only"), hostScript: fakeHost });
+  const running = await owner.start();
+  try {
+    const visitor = createServerSupervisor({
+      config: configFor("ready", { expectedUrl: running.url }),
+      hostScript: fakeHost,
+      forkImpl: () => assert.fail("must not spawn"),
+    });
+    const attached = await visitor.start();
+    assert.deepEqual(attached, { url: running.url, owned: false, ui: false });
+    assert.equal(visitor.isOwned(), false);
   } finally {
     await owner.stop();
   }

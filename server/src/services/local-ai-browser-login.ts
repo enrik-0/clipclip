@@ -46,23 +46,77 @@ _, status = os.waitpid(pid, 0)
 sys.exit(os.waitstatus_to_exitcode(status))
 `;
 
+const WINDOWS_PTY_UNAVAILABLE = "Browser sign-in on Windows requires the optional ConPTY dependency (@lydell/node-pty). Reinstall Paperclip's dependencies, then start sign-in again.";
+const WINDOWS_GOOGLE_UNSUPPORTED = "Google sign-in is not supported on Windows hosts. Run Paperclip on Linux, macOS or WSL, or use a sandbox environment.";
+const CLAUDE_CODE_NOT_ACCEPTED = "Claude did not accept the code (it may be incomplete, expired or already used). Start sign-in again and paste the new code.";
+const CLAUDE_TOKEN_NOT_READ = "Claude finished signing in, but Paperclip could not read the token from its screen. The installed Claude CLI may have changed its output; update Paperclip or report this, then start sign-in again.";
+const NO_LINK_PRODUCED ="Sign-in ended before a link was produced. Make sure the provider CLI is installed and working on this host, then start sign-in again.";
+
+// Minimal view of the pieces of the optional node-pty module that are used.
+type WindowsPty = {
+  onData(listener: (data: string) => void): unknown;
+  onExit(listener: (event: { exitCode: number }) => void): unknown;
+  write(data: string): void;
+  kill(): void;
+};
+type WindowsPtyModule = {
+  spawn(file: string, args: string[] | string, options: {
+    name: string; cols: number; rows: number; cwd: string; env: Record<string, string>;
+  }): WindowsPty;
+};
+
+/** ConPTY via node-pty. Windows has no Python `pty` module, so the Python bridge cannot run there. */
+async function loadWindowsPty(): Promise<WindowsPtyModule> {
+  const loaded = await import("@lydell/node-pty") as unknown as WindowsPtyModule & { default?: WindowsPtyModule };
+  return typeof loaded.spawn === "function" ? loaded : loaded.default!;
+}
+
 /** Run the same browser-code login used by sandbox connections on the local host. */
 export function startLocalBrowserLogin(provider: "anthropic" | "openai" | "google", home: string): LocalBrowserLoginState {
-  if (provider === "google") return startAntigravityBrowserLogin(home);
+  if (provider === "google") {
+    // The native Antigravity runner relies on POSIX descriptors and file ownership checks.
+    if (process.platform === "win32") return { outcome: "failure", error: WINDOWS_GOOGLE_UNSUPPORTED, abort: () => undefined };
+    return startAntigravityBrowserLogin(home);
+  }
   const controller = new AbortController();
   const state: LocalBrowserLoginState = { abort: () => controller.abort() };
   const args = provider === "anthropic" ? ["setup-token"] : ["login", "--device-auth"];
   let child: ChildProcessWithoutNullStreams | null = null;
+  let windowsPty: WindowsPty | null = null;
+  let windowsPtyExited = false;
   const driver = {
     async start(_command: string, onData: (chunk: string) => void): Promise<{ exitCode: number | null }> {
+      const windows = process.platform === "win32";
       let executable = "claude";
+      if (provider === "anthropic" && windows) {
+        try {
+          await ensureCommandResolvable("claude", home, process.env);
+          executable = path.resolve(home, await resolveCommandForLogs("claude", home, process.env));
+        } catch {
+          state.error = "Claude browser sign-in requires the Claude Code CLI on this host. Install Claude Code and ensure claude is on Paperclip's PATH, then start sign-in again.";
+          throw new Error("Browser login runtime unavailable");
+        }
+      }
       if (provider === "openai") {
         const legacyPlatform = !((process.platform === "linux" || process.platform === "darwin")
           && (process.arch === "x64" || process.arch === "arm64"));
+        const codexOnPath = async () => {
+          await ensureCommandResolvable("codex", home, process.env);
+          return path.resolve(home, await resolveCommandForLogs("codex", home, process.env));
+        };
         try {
-          if (legacyPlatform) {
-            await ensureCommandResolvable("codex", home, process.env);
-            executable = path.resolve(home, await resolveCommandForLogs("codex", home, process.env));
+          if (windows) {
+            // Prefer the Codex that ships with Paperclip (@openai/codex); fall back to
+            // one on PATH. Its launcher is a .js file, which is started through node.
+            try {
+              const shipped = resolveCodexCommand();
+              if (typeof shipped !== "string" || !shipped) throw new Error("no shipped Codex");
+              executable = shipped;
+            } catch {
+              executable = await codexOnPath();
+            }
+          } else if (legacyPlatform) {
+            executable = await codexOnPath();
           } else {
             executable = resolveCodexCommand();
           }
@@ -81,6 +135,33 @@ export function startLocalBrowserLogin(provider: "anthropic" | "openai" | "googl
         CODEX_HOME: provider === "openai" ? home : process.env.CODEX_HOME,
         BROWSER: "true",
       };
+      if (windows) {
+        let pty: WindowsPtyModule;
+        try { pty = await loadWindowsPty(); } catch {
+          state.error = WINDOWS_PTY_UNAVAILABLE;
+          throw new Error("Browser login terminal unavailable");
+        }
+        const ptyEnv: Record<string, string> = {};
+        for (const [key, value] of Object.entries(env)) if (typeof value === "string") ptyEnv[key] = value;
+        // ConPTY cannot execute .cmd/.bat shims (npm installs) directly; run them through cmd.exe.
+        const shim = /\.(cmd|bat)$/i.test(executable);
+        // A JavaScript launcher (the shipped Codex) is not an executable either: run it with node.
+        const script = /\.(c|m)?js$/i.test(executable);
+        const file = shim ? (process.env.ComSpec ?? "cmd.exe") : script ? process.execPath : executable;
+        const commandArgs: string[] | string = shim ? `/d /s /c ""${executable}" ${args.join(" ")}"` : script ? [executable, ...args] : args;
+        return new Promise((resolve, reject) => {
+          try {
+            const terminal = pty.spawn(file, commandArgs, { name: "xterm-256color", cols: 200, rows: 50, cwd: process.cwd(), env: ptyEnv });
+            windowsPty = terminal;
+            // Provider output may contain secrets: forward it to the parser only, never log it.
+            terminal.onData(onData);
+            terminal.onExit(({ exitCode }) => { windowsPtyExited = true; resolve({ exitCode }); });
+          } catch {
+            state.error = WINDOWS_PTY_UNAVAILABLE;
+            reject(new Error("Browser login terminal unavailable"));
+          }
+        });
+      }
       return new Promise((resolve, reject) => {
         child = spawn("python3", ["-u", "-c", PYTHON_PTY_BRIDGE, executable, ...args], { env, stdio: ["pipe", "pipe", "pipe"] });
         child.stdout.on("data", (bytes: Buffer) => onData(bytes.toString("utf8")));
@@ -93,9 +174,9 @@ export function startLocalBrowserLogin(provider: "anthropic" | "openai" | "googl
         child.once("close", (exitCode) => resolve({ exitCode }));
       });
     },
-    write(input: string) { child?.stdin.write(input); },
-    stop() { child?.kill("SIGTERM"); },
-    async dispose() { child?.kill("SIGTERM"); },
+    write(input: string) { if (windowsPty) windowsPty.write(input); else child?.stdin.write(input); },
+    stop() { try { if (!windowsPtyExited) windowsPty?.kill(); } catch { /* already exited */ } child?.kill("SIGTERM"); },
+    async dispose() { try { if (!windowsPtyExited) windowsPty?.kill(); } catch { /* already exited */ } child?.kill("SIGTERM"); },
     async readFile(file: string) { const { readLocalAiCredentialFile } = await import("./local-ai-credential-file.js"); return Buffer.from(await readLocalAiCredentialFile(file)); },
   };
   if (provider === "anthropic") {
@@ -104,6 +185,13 @@ export function startLocalBrowserLogin(provider: "anthropic" | "openai" | "googl
     state.submitCode = (code) => { deliverCode?.(code); deliverCode = undefined; };
     void runSetupTokenLogin(driver, {
       timeoutMs: 300_000, signal: controller.signal,
+      // The runner logs only fixed, non-secret sentences. Turn the two that end a
+      // sign-in after the link was shown into an actionable reason for the card.
+      log: (line) => {
+        if (!state.authorizationUrl) return;
+        if (line.includes("ended with a non-zero exit code")) state.error ??= CLAUDE_CODE_NOT_ACCEPTED;
+        else if (line.includes("the credential did not land")) state.error ??= CLAUDE_TOKEN_NOT_READ;
+      },
       onPrompt: (prompt) => { state.authorizationUrl = prompt.url; },
       provideCode: (signal) => new Promise<string>((resolve, reject) => {
         const abort = () => reject(new Error("Local sign-in cancelled"));
@@ -113,21 +201,26 @@ export function startLocalBrowserLogin(provider: "anthropic" | "openai" | "googl
       }),
       onCredential: async (bytes) => {
         const file = await open(path.join(home, ".credentials.json"),
-          constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
+          // O_NOFOLLOW does not exist on Windows; an undefined flag must not poison the mask.
+          constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0), 0o600);
         try {
           await file.writeFile(JSON.stringify({ claudeAiOauth: { accessToken: bytes.toString("utf8") } }));
         } finally {
           await file.close();
         }
       },
-    }).then((result) => { state.outcome = result.outcome === "success" ? "success" : "failure"; })
-      .catch(() => { state.outcome = "failure"; });
+    }).then((result) => {
+      state.outcome = result.outcome === "success" ? "success" : "failure";
+      if (state.outcome === "failure" && !state.authorizationUrl) state.error ??= NO_LINK_PRODUCED;
+    }).catch(() => { state.outcome = "failure"; });
   } else {
     void runDeviceLogin(driver, {
       timeoutMs: 300_000, signal: controller.signal,
       onPrompt: (prompt) => { state.authorizationUrl = prompt.url; state.code = prompt.code; },
-    }).then((result) => { state.outcome = result.outcome === "success" ? "success" : "failure"; })
-      .catch(() => { state.outcome = "failure"; });
+    }).then((result) => {
+      state.outcome = result.outcome === "success" ? "success" : "failure";
+      if (state.outcome === "failure" && !state.authorizationUrl) state.error ??= NO_LINK_PRODUCED;
+    }).catch(() => { state.outcome = "failure"; });
   }
   return state;
 }

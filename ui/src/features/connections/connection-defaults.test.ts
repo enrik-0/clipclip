@@ -46,4 +46,35 @@ describe("askFirstCatalogEntryIdsFor", () => {
       askFirstCatalogEntryIdsFor({ ...result, suggestedDefaults: { askFirstRiskLevels: "write" } }, () => true),
     ).toEqual([]);
   });
+
+  it("gates nothing rather than throwing when the result has no action list", () => {
+    // Gateway setups such as Arcade and Composio can finish without one.
+    expect(askFirstCatalogEntryIdsFor({ suggestedDefaults: {} } as never, () => true)).toEqual([]);
+    expect(
+      askFirstCatalogEntryIdsFor({ actions: {}, suggestedDefaults: result.suggestedDefaults } as never, () => true),
+    ).toEqual([]);
+  });
+});
+
+describe("askFirstCatalogEntryIdsFor with named actions (#11)", () => {
+  const named = (catalogEntryId: string, toolName: string) =>
+    ({ catalogEntryId, toolName, riskLevel: "write" }) as never;
+  const result = {
+    actions: {
+      readOnly: [],
+      canMakeChanges: [named("patch-1", "patch_note"), named("write-1", "write_note")],
+    },
+    suggestedDefaults: {
+      askFirstRiskLevels: [],
+      askFirstActions: [{ toolName: "patch_note", reason: "Patch note can remove text." }],
+    },
+  };
+
+  it("gates only the action the server named", () => {
+    expect(askFirstCatalogEntryIdsFor(result, () => true)).toEqual(["patch-1"]);
+  });
+
+  it("does not gate a named action that is switched off", () => {
+    expect(askFirstCatalogEntryIdsFor(result, (id) => id !== "patch-1")).toEqual([]);
+  });
 });

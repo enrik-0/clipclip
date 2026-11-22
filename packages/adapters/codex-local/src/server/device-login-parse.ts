@@ -32,6 +32,14 @@ export const DEVICE_LOGIN_URL = "https://auth.openai.com/codex/device";
 // eslint-disable-next-line no-control-regex
 const ANSI_CSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]/g;
 
+// A Cursor Position sequence (final byte `H` or `f`). Codex 0.160.0 paints each
+// screen row at an absolute row and column with this sequence, so a row boundary
+// is often a cursor move and not a line feed. Turning each one into a line break
+// keeps the URL, the code preamble and the code on their own lines; without it
+// the next row's text runs onto the URL token and the strict URL check fails.
+// eslint-disable-next-line no-control-regex
+const CSI_CURSOR_POSITION_RE = /\x1b\[[0-9;]*[Hf]/g;
+
 // A candidate URL token is a run of non-space characters that starts with an
 // http or https scheme. The parser validates each candidate with the `URL`
 // class; the regular expression only splits tokens out of the text.
@@ -163,7 +171,7 @@ function findShortCode(text: string, fromIndex: number): string | null {
  */
 export function parseDeviceLoginPrompt(text: string): DeviceLoginPrompt | null {
   if (typeof text !== "string" || text.length === 0) return null;
-  const clean = text.replace(ANSI_CSI_RE, "");
+  const clean = text.replace(CSI_CURSOR_POSITION_RE, "\n").replace(ANSI_CSI_RE, "");
   const urlMatch = findExactDeviceUrl(clean);
   if (!urlMatch) return null;
   const code = findShortCode(clean, urlMatch.end);
