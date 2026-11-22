@@ -110,6 +110,13 @@ export function resolveDesktopConfig({ env, desktopDir, fsImpl = fs, packaged = 
     serverEntry: serverMode === "dist" ? distEntry : sourceEntry,
     tsxLoader: serverMode === "source" ? tsxLoader : null,
     nodePath: env.PAPERCLIP_DESKTOP_NODE || (packaged ? packaged.execPath : "node"),
+    // Only an installed build updates itself. `PAPERCLIP_DESKTOP_AUTO_UPDATE=0`
+    // turns it off, and `PAPERCLIP_DESKTOP_UPDATE_URL` replaces the release feed
+    // baked into the app (a mirror, or a local folder served for testing).
+    autoUpdate: {
+      enabled: Boolean(packaged) && env.PAPERCLIP_DESKTOP_AUTO_UPDATE !== "0",
+      feedUrl: env.PAPERCLIP_DESKTOP_UPDATE_URL ? env.PAPERCLIP_DESKTOP_UPDATE_URL.replace(/\/+$/, "") : null,
+    },
     expectedUrl,
     iconPath: firstExisting(
       [

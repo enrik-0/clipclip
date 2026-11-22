@@ -68,6 +68,27 @@ En Windows, `pnpm build` de la raíz necesita Git Bash como shell de scripts
   (`PAPERCLIP_UI_DEV_MIDDLEWARE=true`), más lento en el primer arranque.
 - **Registro del servidor:** `%APPDATA%\Paperclip Desktop\logs\server.log`.
 
+## Actualizaciones
+
+La app instalada se actualiza sola desde las **GitHub Releases** del repositorio (`electron-updater`). No actúa al
+ejecutarse desde un repositorio ni con `PAPERCLIP_DESKTOP_AUTO_UPDATE=0`.
+
+- Busca una versión nueva 30 segundos después de arrancar y cada 6 horas, y la descarga en segundo plano.
+- Cuando está lista, el menú de la bandeja ofrece **"Reiniciar para actualizar a X"** (para el servidor de forma
+  ordenada, instala en silencio y vuelve a abrir la app). Si no se elige, se instala al elegir "Salir".
+- La versión nueva solo se instala si es **mayor** que la instalada.
+
+**Publicar una versión.** Sube una etiqueta `desktop-vX.Y.Z`. El workflow `desktop-release.yml` construye el instalador con
+esa versión y crea la release con tres archivos: `Paperclip-Desktop-Setup-X.Y.Z.exe`, su `.blockmap` y `latest.yml`. El
+`latest.yml` es lo que lee el actualizador, y su `url` debe coincidir con el nombre del instalador, por eso `artifactName`
+no lleva espacios (GitHub los cambia por puntos). El propietario y el repositorio salen de `github.repository`.
+
+**Probarlo sin publicar.** Sirve una carpeta con `latest.yml` y el instalador por HTTP y arranca la app con
+`PAPERCLIP_DESKTOP_UPDATE_URL=http://127.0.0.1:8766`.
+
+Limitaciones: el repositorio no debe tener otras releases que no sean de la app de escritorio (el actualizador toma la
+última release publicada), y sin firma de código no se verifica el editor del instalador, solo su hash `sha512`.
+
 ## Configuración
 
 Las variables del archivo de entorno se pasan al servidor; las del proceso tienen prioridad.
@@ -79,6 +100,8 @@ Las variables del archivo de entorno se pasan al servidor; las del proceso tiene
 | `PAPERCLIP_DESKTOP_URL` | `http://127.0.0.1:<PORT o 3100>` | URL donde buscar un servidor ya en marcha |
 | `PAPERCLIP_DESKTOP_SERVER_MODE` | `source` si hay `tsx`, si no `dist` | Ejecutar `server/src` o `server/dist` |
 | `PAPERCLIP_DESKTOP_NODE` | `node` | Ejecutable de Node para el servidor |
+| `PAPERCLIP_DESKTOP_AUTO_UPDATE` | activa en la app instalada | `0` desactiva la autoactualización |
+| `PAPERCLIP_DESKTOP_UPDATE_URL` | las releases de GitHub | Origen alternativo de actualizaciones (un `latest.yml` servido por HTTP) |
 
 "Iniciar con Windows" no conserva variables definidas solo en la terminal: usa los valores por defecto o defínelas como
 variables de entorno del usuario.
@@ -90,6 +113,7 @@ variables de entorno del usuario.
 - `src/server-host.mjs`: proceso Node que aloja el servidor y recibe la orden de apagado por IPC, porque Windows no
   puede enviar `SIGTERM` a un proceso hijo.
 - `src/config.mjs`: resolución de rutas y entorno.
+- `src/updater.mjs`: autoactualización (estado y comprobaciones; el actualizador se inyecta para poder probarlo).
 - `src/status-page.mjs`: página local de carga y de error.
 
 ## Pruebas
@@ -100,7 +124,7 @@ pnpm test
 
 ## Limitaciones conocidas
 
-- No hay actualización automática ni firma de código (SmartScreen avisará al instalar).
+- No hay firma de código (SmartScreen avisará al instalar).
 - En Windows, la librería del Postgres embebido lo detiene con `taskkill /f`. De forma intermitente puede quedar un
   proceso `postgres.exe` huérfano que impide el siguiente arranque ("pre-existing shared memory block is still in
   use"). El origen está en esa librería, no en esta app; se resuelve terminando ese proceso.

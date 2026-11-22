@@ -5,6 +5,7 @@ import { app, BrowserWindow, Menu, Tray, nativeImage, shell } from "electron";
 import { resolveDesktopConfig } from "./config.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
 import { statusPageUrl } from "./status-page.mjs";
+import { createUpdater } from "./updater.mjs";
 
 const srcDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.join(srcDir, "..");
@@ -36,6 +37,8 @@ let logStream = null;
 let logTail = "";
 let quitting = false;
 let trayHintShown = false;
+let updater = null;
+let updateNoticeVersion = null;
 
 function appendLog(text) {
   logTail = (logTail + text).slice(-LOG_TAIL_CHARS);
@@ -130,6 +133,54 @@ function createWindow() {
   if (serverUrl) void mainWindow.loadURL(serverUrl);
 }
 
+function updateMenuItems() {
+  const item = updater?.trayItem();
+  if (!item) return [];
+  return [
+    {
+      label: item.label,
+      enabled: item.enabled,
+      click: () => (item.action === "install" ? void updater.installNow() : void updater.checkNow()),
+    },
+  ];
+}
+
+function noticeUpdateReady(version) {
+  if (updateNoticeVersion === version || !tray || process.platform !== "win32") return;
+  updateNoticeVersion = version;
+  tray.displayBalloon({
+    title: `Paperclip ${version} está listo`,
+    content: 'Elige "Reiniciar para actualizar" en el icono de la bandeja, o se instalará al salir.',
+  });
+}
+
+async function startUpdater() {
+  if (!config.autoUpdate.enabled) return;
+  try {
+    // Loaded only when updates are on, so a run from a checkout never needs it.
+    const { default: electronUpdater } = await import("electron-updater");
+    updater = createUpdater({
+      autoUpdater: electronUpdater.autoUpdater,
+      enabled: true,
+      feedUrl: config.autoUpdate.feedUrl,
+      log: (line) => appendLog(`${line}\n`),
+      // Stop the server in an orderly way first, so the installer does not cut
+      // running agents or the embedded database.
+      prepareToInstall: async () => {
+        await supervisor?.stop();
+      },
+      onChange: (state) => {
+        refreshTray();
+        if (state.status === "downloaded") noticeUpdateReady(state.version);
+      },
+    });
+    updater.start();
+    refreshTray();
+  } catch (error) {
+    appendLog(`[desktop] auto update is not available: ${error?.message ?? error}\n`);
+  }
+}
+
 function buildTrayMenu() {
   const loginItem = app.getLoginItemSettings(loginItemOptions());
   return Menu.buildFromTemplate([
@@ -154,6 +205,7 @@ function buildTrayMenu() {
         refreshTray();
       },
     },
+    ...updateMenuItems(),
     { type: "separator" },
     { label: "Salir", click: () => app.quit() },
   ]);
@@ -251,8 +303,13 @@ if (!app.requestSingleInstanceLock()) {
       busy: true,
     });
     void supervisor.stop().finally(() => {
-      logStream?.end();
-      app.exit(0);
+      const stream = logStream;
+      logStream = null;
+      stream?.end();
+      // Quit again rather than `app.exit`: `quitting` is set, so before-quit lets
+      // this pass through, and the "quit" event fires. That event is where
+      // electron-updater installs a downloaded update when the app closes.
+      app.quit();
     });
   });
 
@@ -268,5 +325,6 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     if (!startHidden) showWindow();
     await startServer();
+    await startUpdater();
   });
 }

@@ -151,6 +151,37 @@ test("a packaged build creates the agent JWT secret once and keeps it in its env
   assert.equal(readEnvFile(path.join(userData, ".env")).PAPERCLIP_AGENT_JWT_SECRET, secret);
 });
 
+test("auto update is on for an installed build and off when running from a checkout", () => {
+  const runtime = makeRepo({ "server/dist/index.js": "" });
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-desktop-data-"));
+  const packaged = { runtimeDir: runtime, userDataDir: userData, execPath: path.join(runtime, "app.exe") };
+  const desktopDir = path.join(runtime, "app.asar");
+
+  const installed = resolveDesktopConfig({ env: {}, desktopDir, packaged });
+  assert.deepEqual(installed.autoUpdate, { enabled: true, feedUrl: null });
+
+  const repo = makeRepo({ ...SOURCE_SERVER });
+  const fromCheckout = resolveDesktopConfig({ env: {}, desktopDir: path.join(repo, "desktop") });
+  assert.equal(fromCheckout.autoUpdate.enabled, false);
+});
+
+test("auto update can be turned off, or pointed at another feed, from the environment", () => {
+  const runtime = makeRepo({ "server/dist/index.js": "" });
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "paperclip-desktop-data-"));
+  const packaged = { runtimeDir: runtime, userDataDir: userData, execPath: path.join(runtime, "app.exe") };
+  const desktopDir = path.join(runtime, "app.asar");
+
+  const off = resolveDesktopConfig({ env: { PAPERCLIP_DESKTOP_AUTO_UPDATE: "0" }, desktopDir, packaged });
+  assert.equal(off.autoUpdate.enabled, false);
+
+  const mirrored = resolveDesktopConfig({
+    env: { PAPERCLIP_DESKTOP_UPDATE_URL: "http://127.0.0.1:8766/" },
+    desktopDir,
+    packaged,
+  });
+  assert.deepEqual(mirrored.autoUpdate, { enabled: true, feedUrl: "http://127.0.0.1:8766" });
+});
+
 test("an unpackaged run never writes a secret into the repository env file", () => {
   const repo = makeRepo({ ...SOURCE_SERVER });
   const config = resolveDesktopConfig({ env: {}, desktopDir: path.join(repo, "desktop") });

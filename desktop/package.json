@@ -37,6 +37,11 @@
       }
     ],
     "compression": "maximum",
+    "publish": {
+      "provider": "github",
+      "owner": "enrik-0",
+      "repo": "clipclip"
+    },
     "asar": true,
     "win": {
       "target": [
@@ -53,6 +58,7 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
+      "artifactName": "Paperclip-Desktop-Setup-${version}.${ext}",
       "include": "build/installer.nsh"
     }
   },
@@ -68,5 +74,8 @@
     "patchedDependencies": {
       "app-builder-lib@26.18.0": "patches/app-builder-lib@26.18.0.patch"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6"
   }
 }

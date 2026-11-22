@@ -119,6 +119,10 @@ jobs:
 
       # Maximum compression comes from "compression" in desktop/package.json. It
       # is slow, which is why developers build without it (see desktop/README.md).
+      # Installed apps update themselves from this repository's GitHub releases.
+      # The owner and repository are read from the workflow run, so a fork or a
+      # moved repository publishes to itself. The version comes from the tag:
+      # the updater installs a release only when its version is newer.
       - name: Build installer
         shell: bash
         working-directory: desktop
@@ -126,7 +130,10 @@ jobs:
           if [ -n "${{ steps.version.outputs.version }}" ]; then
             npm pkg set version="${{ steps.version.outputs.version }}"
           fi
+          npm pkg set build.publish.owner="${GITHUB_REPOSITORY_OWNER}" build.publish.repo="${GITHUB_REPOSITORY#*/}"
           node node_modules/electron-builder/cli.js --win nsis --publish never
+          # latest.yml is what the updater reads. Fail here if it is missing.
+          test -f release/latest.yml
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
@@ -135,6 +142,7 @@ jobs:
           path: |
             desktop/release/*Setup*.exe
             desktop/release/*.blockmap
+            desktop/release/latest.yml
           if-no-files-found: error
           retention-days: 14
 
@@ -147,4 +155,6 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --title "Paperclip Desktop ${GITHUB_REF_NAME#desktop-v}" \
             --generate-notes \
-            desktop/release/*Setup*.exe
+            desktop/release/*Setup*.exe \
+            desktop/release/*.blockmap \
+            desktop/release/latest.yml
