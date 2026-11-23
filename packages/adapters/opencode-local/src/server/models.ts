@@ -353,6 +353,13 @@ export async function ensureOpenCodeModelConfiguredAndAvailable(input: {
   return models;
 }
 
+// A spawn failure from runChildProcess appends the whole PATH to its message.
+// Keep the part that tells the user what failed; the PATH is noise in the UI.
+function conciseDiscoveryError(err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  return new Error(message.replace(/\s*Verify adapter command[\s\S]*$/, "").trim() || "`opencode models` failed.");
+}
+
 function discoveryInputFromContext(context: AdapterModelDiscoveryContext) {
   const config = context.config;
   return {
@@ -371,7 +378,11 @@ function discoveryInputFromContext(context: AdapterModelDiscoveryContext) {
 export async function listOpenCodeModels(
   context?: AdapterModelDiscoveryContext,
 ): Promise<AdapterModel[]> {
-  if (context) return discoverOpenCodeModelsCached(discoveryInputFromContext(context));
+  if (context) {
+    return discoverOpenCodeModelsCached(discoveryInputFromContext(context)).catch((err) => {
+      throw conciseDiscoveryError(err);
+    });
+  }
   try {
     return await discoverOpenCodeModelsCached();
   } catch {
@@ -382,7 +393,11 @@ export async function listOpenCodeModels(
 export async function refreshOpenCodeModels(
   context?: AdapterModelDiscoveryContext,
 ): Promise<AdapterModel[]> {
-  if (context) return refreshOpenCodeModelsCached(discoveryInputFromContext(context));
+  if (context) {
+    return refreshOpenCodeModelsCached(discoveryInputFromContext(context)).catch((err) => {
+      throw conciseDiscoveryError(err);
+    });
+  }
   try {
     return await refreshOpenCodeModelsCached({});
   } catch {
