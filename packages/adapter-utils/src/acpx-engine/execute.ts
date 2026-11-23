@@ -3,6 +3,7 @@ import { prepareAcpxCodexObservabilityHome } from "../codex-observability-home.j
 import { codexShellEnvironmentKeys } from "../codex-shell-environment.js";
 import { applyObservabilityEnvironment } from "../agent-observability.js";
 import { cancellableSandboxStartup } from "./startup-cancellation.js";
+import { resolveAgentRegistryOverride } from "./agent-command-argv.js";
 import { emitStartupReuse, environmentStartupReuse, summarizeStartupReuse, type StartupReuseReason } from "../startup-reuse.js";
 import { withAdapterExecutionPhase, type AdapterExecutionPhase } from "../execution-phase.js";
 import fs from "node:fs/promises";
@@ -2660,8 +2661,11 @@ async function buildRuntime(input: {
     ? [process.execPath, processSessionBridge.agentCommand]
       .map((part) => JSON.stringify(part.replaceAll("\\", "/"))).join(" ")
     : agentCommand;
-  const overrides = overrideCommand ? { [acpxAgent]: overrideCommand } : undefined;
-  const agentRegistry = createAgentRegistry({ overrides });
+  const registryOverride = resolveAgentRegistryOverride(overrideCommand);
+  const overrides = registryOverride ? { [acpxAgent]: registryOverride } : undefined;
+  // acpx 0.12 typings only list string overrides; 0.13+ accepts argv arrays
+  // (see resolveAgentRegistryOverride, which only emits one when supported).
+  const agentRegistry = createAgentRegistry({ overrides: overrides as Record<string, string> | undefined });
   const loggedEnv = buildInvocationEnvForLogs(env, {
     runtimeEnv,
     includeRuntimeKeys: ["HOME"],
