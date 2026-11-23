@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { AdapterModel } from "@paperclipai/adapter-utils";
 import { models as DIRECT_MODELS } from "../index.js";
 import { sortClaudeModels } from "./model-order.js";
+import { fetchClaudeCodeModels } from "./sdk-models.js";
 
 const ANTHROPIC_MODELS_ENDPOINT = "/v1/models";
 const ANTHROPIC_MODELS_TIMEOUT_MS = 5000;
@@ -9,7 +10,7 @@ const ANTHROPIC_MODELS_CACHE_TTL_MS = 60_000;
 const ANTHROPIC_API_VERSION = "2023-06-01";
 const PUBLIC_CATALOG_URL = "https://models.dev/api.json";
 const PUBLIC_CATALOG_TIMEOUT_MS = 4000;
-const PUBLIC_CATALOG_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const KEYLESS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * AWS Bedrock model IDs — region-qualified identifiers required by the Bedrock API. Listed in
@@ -157,20 +158,33 @@ async function fetchPublicCatalogModels(url: string): Promise<AdapterModel[]> {
   }
 }
 
-async function loadCatalogModels(forceRefresh: boolean): Promise<AdapterModel[]> {
+let keylessInFlight: Promise<AdapterModel[]> | null = null;
+
+/**
+ * Without an API key: ask the installed Claude Code first (it only lists what this install
+ * supports), then the public catalog, then the fixed list.
+ */
+async function loadKeylessModels(forceRefresh: boolean): Promise<AdapterModel[]> {
   const url = resolveCatalogUrl();
   const now = Date.now();
   if (!forceRefresh && catalogCached && catalogCached.url === url && catalogCached.expiresAt > now) {
     return catalogCached.models;
   }
-  const fetched = await fetchPublicCatalogModels(url);
-  if (fetched.length > 0) {
-    const merged = mergedWithFallback(fetched);
-    catalogCached = { url, expiresAt: now + PUBLIC_CATALOG_CACHE_TTL_MS, models: merged };
-    return merged;
-  }
-  if (catalogCached && catalogCached.url === url) return catalogCached.models;
-  return sortClaudeModels(dedupeModels(DIRECT_MODELS));
+  if (keylessInFlight) return keylessInFlight;
+  keylessInFlight = (async () => {
+    let fetched = await fetchClaudeCodeModels();
+    if (fetched.length === 0) fetched = await fetchPublicCatalogModels(url);
+    if (fetched.length > 0) {
+      const merged = mergedWithFallback(fetched);
+      catalogCached = { url, expiresAt: Date.now() + KEYLESS_CACHE_TTL_MS, models: merged };
+      return merged;
+    }
+    if (catalogCached && catalogCached.url === url) return catalogCached.models;
+    return sortClaudeModels(dedupeModels(DIRECT_MODELS));
+  })().finally(() => {
+    keylessInFlight = null;
+  });
+  return keylessInFlight;
 }
 
 async function loadClaudeModels(options?: { forceRefresh?: boolean }): Promise<AdapterModel[]> {
@@ -178,7 +192,7 @@ async function loadClaudeModels(options?: { forceRefresh?: boolean }): Promise<A
 
   const fallback = sortClaudeModels(dedupeModels(DIRECT_MODELS));
   const apiKey = resolveAnthropicApiKey();
-  if (!apiKey) return loadCatalogModels(options?.forceRefresh === true);
+  if (!apiKey) return loadKeylessModels(options?.forceRefresh === true);
 
   const now = Date.now();
   const baseUrl = resolveAnthropicBaseUrl();
@@ -228,6 +242,7 @@ export async function refreshClaudeModels(): Promise<AdapterModel[]> {
 export function resetClaudeModelsCacheForTests() {
   cached = null;
   catalogCached = null;
+  keylessInFlight = null;
 }
 
 /** Check whether a model ID is a Bedrock-native identifier (not an Anthropic API short name). */

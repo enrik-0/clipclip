@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { models as DIRECT_MODELS } from "../index.js";
+
+const sdkModels = vi.hoisted(() => ({ fetchClaudeCodeModels: vi.fn() }));
+vi.mock("./sdk-models.js", () => sdkModels);
+
 import { listClaudeModels, refreshClaudeModels, resetClaudeModelsCacheForTests } from "./models.js";
 
 const ENV_KEYS = [
@@ -40,6 +44,8 @@ describe("listClaudeModels without ANTHROPIC_API_KEY", () => {
       delete process.env[key];
     }
     resetClaudeModelsCacheForTests();
+    sdkModels.fetchClaudeCodeModels.mockReset();
+    sdkModels.fetchClaudeCodeModels.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -89,6 +95,39 @@ describe("listClaudeModels without ANTHROPIC_API_KEY", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     await refreshClaudeModels();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("prefers the models Claude Code reports and does not call the public catalog", async () => {
+    sdkModels.fetchClaudeCodeModels.mockResolvedValue([{ id: "claude-opus-9", label: "Claude Opus 9" }]);
+    const fetchMock = mockCatalog(catalog);
+    const resultIds = ids(await listClaudeModels());
+    expect(resultIds).toContain("claude-opus-9");
+    expect(resultIds).toContain("claude-fable-5-1");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the public catalog when Claude Code reports nothing", async () => {
+    const fetchMock = mockCatalog(catalog);
+    expect(ids(await listClaudeModels())).toContain("claude-opus-9");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("caches the Claude Code result for a day and refresh bypasses the cache", async () => {
+    vi.useFakeTimers();
+    try {
+      sdkModels.fetchClaudeCodeModels.mockResolvedValue([{ id: "claude-opus-9", label: "Claude Opus 9" }]);
+      await listClaudeModels();
+      vi.advanceTimersByTime(23 * 60 * 60 * 1000);
+      await listClaudeModels();
+      expect(sdkModels.fetchClaudeCodeModels).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(2 * 60 * 60 * 1000);
+      await listClaudeModels();
+      expect(sdkModels.fetchClaudeCodeModels).toHaveBeenCalledTimes(2);
+      await refreshClaudeModels();
+      expect(sdkModels.fetchClaudeCodeModels).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps serving the last good catalog if a later refresh fails", async () => {
