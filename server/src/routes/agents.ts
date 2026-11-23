@@ -159,6 +159,7 @@ import type { AdapterExecutionTarget } from "@paperclipai/adapter-utils/executio
 import type {
   AdapterEnvironmentCheck,
   AdapterEnvironmentTestResult,
+  AdapterModelDiscoveryContext,
 } from "@paperclipai/adapter-utils";
 import { evaluateCodexCredentialReadiness } from "@paperclipai/adapter-codex-local/server";
 import type { AdapterAuthSignal, AdapterAuthSignalResponse, CodexAccountBindingClaim } from "@paperclipai/shared";
@@ -3182,9 +3183,33 @@ export function agentRoutes(
       res.json(requireServerAdapter(modelAdapterType).models ?? []);
       return;
     }
-    const models = refresh
-      ? await refreshAdapterModels(modelAdapterType)
-      : await listAdapterModels(modelAdapterType);
+    // opencode_local discovers models with the agent's own command/cwd/env, and a
+    // discovery failure is reported instead of falling back to the static model.
+    let discoveryContext: AdapterModelDiscoveryContext | undefined;
+    const discoveryAgentId = modelAdapterType === "opencode_local" ? asNonEmptyString(req.query.agentId) : null;
+    if (discoveryAgentId) {
+      const discoveryAgent = await svc.getById(discoveryAgentId);
+      if (!discoveryAgent || discoveryAgent.companyId !== companyId) throw notFound("Agent not found");
+      await assertCanUpdateAgent(req, discoveryAgent);
+      if (discoveryAgent.adapterType === "opencode_local") {
+        const { config } = await secretsSvc.resolveAdapterConfigForRuntime(
+          companyId,
+          discoveryAgent.adapterConfig,
+          buildActorSecretContext(req, { consumerType: "agent", consumerId: discoveryAgent.id }),
+          { adapterType: discoveryAgent.adapterType, skipUserSecrets: true },
+        );
+        discoveryContext = { config };
+      }
+    }
+    let models: { id: string; label: string }[];
+    try {
+      models = refresh
+        ? await refreshAdapterModels(modelAdapterType, discoveryContext)
+        : await listAdapterModels(modelAdapterType, discoveryContext);
+    } catch (err) {
+      if (!discoveryContext) throw err;
+      throw unprocessable(err instanceof Error ? err.message : "Model discovery failed");
+    }
     // The Legacy default marker is not an explicit native ACP model ID.
     res.json(type === "paperclip_runner" && modelAdapterType === "grok_local"
       ? models.filter(model => model.id !== "grok-build")

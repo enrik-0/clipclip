@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import os from "node:os";
-import type { AdapterModel } from "@paperclipai/adapter-utils";
+import type { AdapterModel, AdapterModelDiscoveryContext } from "@paperclipai/adapter-utils";
 import {
   asString,
   ensurePathInEnv,
@@ -353,9 +353,38 @@ export async function ensureOpenCodeModelConfiguredAndAvailable(input: {
   return models;
 }
 
-export async function listOpenCodeModels(): Promise<AdapterModel[]> {
+function discoveryInputFromContext(context: AdapterModelDiscoveryContext) {
+  const config = context.config;
+  return {
+    command: config.command,
+    cwd: config.cwd,
+    env: config.env,
+  };
+}
+
+/**
+ * Without a context (e.g. a new agent that has no config yet) discovery uses the
+ * server defaults and failures yield an empty list so callers can fall back to
+ * the static model. With the agent's context, discovery runs with the agent's
+ * command/cwd/env and a failure is thrown so it can be shown to the user.
+ */
+export async function listOpenCodeModels(
+  context?: AdapterModelDiscoveryContext,
+): Promise<AdapterModel[]> {
+  if (context) return discoverOpenCodeModelsCached(discoveryInputFromContext(context));
   try {
     return await discoverOpenCodeModelsCached();
+  } catch {
+    return [];
+  }
+}
+
+export async function refreshOpenCodeModels(
+  context?: AdapterModelDiscoveryContext,
+): Promise<AdapterModel[]> {
+  if (context) return refreshOpenCodeModelsCached(discoveryInputFromContext(context));
+  try {
+    return await refreshOpenCodeModelsCached({});
   } catch {
     return [];
   }
