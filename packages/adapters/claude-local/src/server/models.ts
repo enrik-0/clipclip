@@ -7,6 +7,9 @@ const ANTHROPIC_MODELS_ENDPOINT = "/v1/models";
 const ANTHROPIC_MODELS_TIMEOUT_MS = 5000;
 const ANTHROPIC_MODELS_CACHE_TTL_MS = 60_000;
 const ANTHROPIC_API_VERSION = "2023-06-01";
+const PUBLIC_CATALOG_URL = "https://models.dev/api.json";
+const PUBLIC_CATALOG_TIMEOUT_MS = 4000;
+const PUBLIC_CATALOG_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 /**
  * AWS Bedrock model IDs — region-qualified identifiers required by the Bedrock API. Listed in
@@ -30,6 +33,7 @@ const BEDROCK_MODELS: AdapterModel[] = [
   { id: "us.anthropic.claude-sonnet-4-5-20250929-v2:0", label: "Bedrock Sonnet 4.5" },
 ];
 
+let catalogCached: { url: string; expiresAt: number; models: AdapterModel[] } | null = null;
 let cached: { keyFingerprint: string; baseUrl: string; expiresAt: number; models: AdapterModel[] } | null = null;
 
 function isBedrockEnv(): boolean {
@@ -116,12 +120,65 @@ async function fetchAnthropicModels(apiKey: string, baseUrl: string): Promise<Ad
   }
 }
 
+function resolveCatalogUrl(): string {
+  const url = process.env.PAPERCLIP_CLAUDE_MODELS_CATALOG_URL?.trim();
+  return url && url.length > 0 ? url : PUBLIC_CATALOG_URL;
+}
+
+/**
+ * Public models.dev catalog (no API key needed). Only the `anthropic` provider's bare `claude-*`
+ * aliases are kept: dated snapshots (`-20251001`) would only duplicate the alias in the picker.
+ */
+async function fetchPublicCatalogModels(url: string): Promise<AdapterModel[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PUBLIC_CATALOG_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) return [];
+    const payload = (await response.json()) as { anthropic?: { models?: unknown } } | null;
+    const raw = payload?.anthropic?.models;
+    if (typeof raw !== "object" || raw === null) return [];
+    const models: AdapterModel[] = [];
+    for (const [key, value] of Object.entries(raw)) {
+      const record = (typeof value === "object" && value !== null ? value : {}) as { id?: unknown; name?: unknown };
+      const id = typeof record.id === "string" ? record.id.trim() : key.trim();
+      if (!id.startsWith("claude-") || /-\d{8}$/.test(id) || id.endsWith("-latest")) continue;
+      const name = typeof record.name === "string" && record.name.trim().length > 0 ? record.name.trim() : id;
+      models.push({ id, label: name });
+    }
+    return dedupeModels(models);
+  } catch (error) {
+    console.warn("[paperclip] Claude public model catalog failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function loadCatalogModels(forceRefresh: boolean): Promise<AdapterModel[]> {
+  const url = resolveCatalogUrl();
+  const now = Date.now();
+  if (!forceRefresh && catalogCached && catalogCached.url === url && catalogCached.expiresAt > now) {
+    return catalogCached.models;
+  }
+  const fetched = await fetchPublicCatalogModels(url);
+  if (fetched.length > 0) {
+    const merged = mergedWithFallback(fetched);
+    catalogCached = { url, expiresAt: now + PUBLIC_CATALOG_CACHE_TTL_MS, models: merged };
+    return merged;
+  }
+  if (catalogCached && catalogCached.url === url) return catalogCached.models;
+  return sortClaudeModels(dedupeModels(DIRECT_MODELS));
+}
+
 async function loadClaudeModels(options?: { forceRefresh?: boolean }): Promise<AdapterModel[]> {
   if (isBedrockEnv()) return sortClaudeModels(dedupeModels(BEDROCK_MODELS));
 
   const fallback = sortClaudeModels(dedupeModels(DIRECT_MODELS));
   const apiKey = resolveAnthropicApiKey();
-  if (!apiKey) return fallback;
+  if (!apiKey) return loadCatalogModels(options?.forceRefresh === true);
 
   const now = Date.now();
   const baseUrl = resolveAnthropicBaseUrl();
@@ -170,6 +227,7 @@ export async function refreshClaudeModels(): Promise<AdapterModel[]> {
 
 export function resetClaudeModelsCacheForTests() {
   cached = null;
+  catalogCached = null;
 }
 
 /** Check whether a model ID is a Bedrock-native identifier (not an Anthropic API short name). */
