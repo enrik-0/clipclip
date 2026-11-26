@@ -1984,6 +1984,53 @@ describe("AgentConfigForm environment selector", () => {
     expect(result.container.textContent).toContain("Network unavailable");
   });
 
+  it("refreshes a saved OpenCode agent's models with that agent's configuration", async () => {
+    mockAgentsApi.adapterModels.mockResolvedValue([{ id: "agentonly/agent-model", label: "agentonly/agent-model" }]);
+    const result = await renderForm([makeEnvironment({ id: "local-1", name: "Local", driver: "local" })], {
+      adapterType: "opencode_local", adapterConfig: { model: "opencode/big-pickle" },
+    });
+    roots.push(result.root);
+    await vi.waitFor(() => expect(mockAgentsApi.adapterModels).toHaveBeenCalledTimes(1));
+    await clickByText(result.container, "opencode/big-pickle");
+    await clickByText(document.body, "Refresh models");
+
+    await vi.waitFor(() => expect(mockAgentsApi.adapterModels).toHaveBeenCalledTimes(2));
+    expect(mockAgentsApi.adapterModels).toHaveBeenLastCalledWith(
+      "company-1",
+      "opencode_local",
+      expect.objectContaining({ refresh: true, agentId: makeAgent().id }),
+    );
+  });
+
+  it("does not show one OpenCode agent the models cached for another", async () => {
+    mockAgentsApi.adapterModels.mockImplementation((_companyId: string, _type: string, options?: { agentId?: string }) =>
+      options?.agentId === "agent-1"
+        ? Promise.resolve([{ id: "first/only-model", label: "first/only-model" }])
+        : new Promise(() => {}));
+    mockEnvironmentsApi.list.mockResolvedValue([makeEnvironment({ id: "local-1", name: "Local", driver: "local" })]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    const queryClient = createFormQueryClient();
+    const show = async (id: string) => {
+      await act(async () => {
+        renderFormView(root, queryClient,
+          <AgentConfigForm key={id} mode="edit" onSave={vi.fn()} hidePromptTemplate showAdapterTypeField={false}
+            agent={makeAgent({ id, adapterType: "opencode_local", adapterConfig: { model: "opencode/big-pickle" } })} />);
+      });
+      await flushReact();
+    };
+
+    await show("agent-1");
+    await vi.waitFor(() => expect(mockAgentsApi.adapterModels).toHaveBeenCalledTimes(1));
+    await flushReact();
+    await show("agent-2");
+    await clickByText(container, "opencode/big-pickle");
+
+    expect(document.body.textContent).not.toContain("only-model");
+  });
+
   it("moves through model options with the same keyboard controls as the harness picker", async () => {
     const curated = [
       { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
