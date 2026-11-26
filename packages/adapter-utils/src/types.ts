@@ -300,6 +300,17 @@ export interface AdapterModel {
   label: string;
 }
 
+/**
+ * Per-agent context for model discovery. When present, the adapter discovers
+ * models with the agent's runtime config (command, cwd, env) instead of the
+ * server's defaults, and a discovery failure is thrown to the caller instead of
+ * being swallowed into an empty list.
+ */
+export interface AdapterModelDiscoveryContext {
+  /** Runtime adapter config with secrets already resolved. */
+  config: Record<string, unknown>;
+}
+
 export type AdapterEnvironmentCheckLevel = "info" | "warn" | "error";
 
 export interface AdapterEnvironmentCheck {
@@ -520,14 +531,14 @@ export interface ServerAdapterModule {
   /** How this adapter receives Paperclip's run-scoped control tools. */
   runtimeToolDelivery?: AdapterRuntimeToolDelivery;
   models?: AdapterModel[];
-  listModels?: () => Promise<AdapterModel[]>;
+  listModels?: (context?: AdapterModelDiscoveryContext) => Promise<AdapterModel[]>;
   /**
    * Optional explicit refresh hook for model discovery.
    * Use this when the adapter caches discovered models and needs a bypass path
    * so the UI can fetch newly released models without waiting for cache expiry
    * or a Paperclip code update.
    */
-  refreshModels?: () => Promise<AdapterModel[]>;
+  refreshModels?: (context?: AdapterModelDiscoveryContext) => Promise<AdapterModel[]>;
   agentConfigurationDoc?: string;
   /**
    * Optional lifecycle hook when an agent is approved/hired (join-request or hire_agent approval).

@@ -4,6 +4,7 @@ import {
   discoverOpenCodeModels,
   ensureOpenCodeModelConfiguredAndAvailable,
   listOpenCodeModels,
+  refreshOpenCodeModels,
   requireOpenCodeModelId,
   resetOpenCodeModelsCacheForTests,
 } from "./models.js";
@@ -314,5 +315,83 @@ describe("openCode models", () => {
     await vi.runAllTimersAsync();
     await assertion;
     expect(spy).toHaveBeenCalledTimes(3);
+  });
+
+  describe("with the agent's discovery context", () => {
+    const ok = (stdout: string) => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      stdout,
+      stderr: "",
+      pid: 1,
+      startedAt: new Date().toISOString(),
+    });
+
+    it("lists models with the agent's command and env, not the server's", async () => {
+      process.env.PAPERCLIP_OPENCODE_COMMAND = "server-opencode";
+      const spy = vi
+        .spyOn(serverUtils, "runChildProcess")
+        .mockResolvedValue(ok("openai/gpt-5\n"));
+
+      await expect(
+        listOpenCodeModels({
+          config: {
+            command: "agent-opencode",
+            cwd: "/agent/cwd",
+            env: { OPENAI_API_KEY: "agent-key" },
+          },
+        }),
+      ).resolves.toEqual([{ id: "openai/gpt-5", label: "openai/gpt-5" }]);
+
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0]?.[1]).toBe("agent-opencode");
+      const options = spy.mock.calls[0]?.[3] as {
+        cwd: string;
+        env: Record<string, string>;
+      };
+      expect(options.cwd).toBe("/agent/cwd");
+      expect(options.env.OPENAI_API_KEY).toBe("agent-key");
+    });
+
+    it("throws a readable error instead of returning an empty list when discovery fails", async () => {
+      vi.useFakeTimers();
+      vi.spyOn(serverUtils, "runChildProcess").mockResolvedValue({
+        ...ok(""),
+        exitCode: 1,
+        stderr: "provider auth missing",
+      });
+
+      const promise = listOpenCodeModels({ config: { command: "opencode" } });
+      const assertion = expect(promise).rejects.toThrow(
+        "`opencode models` failed: provider auth missing",
+      );
+      await vi.runAllTimersAsync();
+      await assertion;
+    });
+
+    it("refresh runs `opencode models --refresh` and bypasses the 60s cache", async () => {
+      const spy = vi
+        .spyOn(serverUtils, "runChildProcess")
+        .mockResolvedValueOnce(ok("openai/old\n"))
+        .mockResolvedValueOnce(ok("Models cache refreshed\n"))
+        .mockResolvedValueOnce(ok("openai/old\nopenai/new\n"));
+      const context = { config: { command: "opencode" } };
+
+      await expect(listOpenCodeModels(context)).resolves.toEqual([
+        { id: "openai/old", label: "openai/old" },
+      ]);
+      // A second plain list is served from the cache without a new process.
+      await listOpenCodeModels(context);
+      expect(spy).toHaveBeenCalledTimes(1);
+
+      const refreshed = await refreshOpenCodeModels(context);
+      expect(refreshed.map((model) => model.id)).toEqual([
+        "openai/new",
+        "openai/old",
+      ]);
+      expect(spy.mock.calls[1]?.[2]).toEqual(["models", "--refresh"]);
+      expect(spy.mock.calls[2]?.[2]).toEqual(["models"]);
+    });
   });
 });
