@@ -7,6 +7,7 @@ import {
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
 import { isValidOpenCodeModelId } from "../index.js";
+import { detectOpenCodeCliVersion, openCodeCliUsesBackgroundService } from "./cli-version.js";
 
 const MODELS_CACHE_TTL_MS = 60_000;
 const MODELS_DISCOVERY_TIMEOUT_MS = 20_000;
@@ -371,13 +372,16 @@ function conciseDiscoveryError(err: unknown): Error {
   return new Error(message.replace(/\s*Verify adapter command[\s\S]*$/, "").trim() || "`opencode models` failed.");
 }
 
-function discoveryInputFromContext(context: AdapterModelDiscoveryContext) {
-  const config = context.config;
-  return {
-    command: config.command,
-    cwd: config.cwd,
-    env: config.env,
-  };
+// The selector follows the same CLI flavor rules as execute(): OpenCode 2.x
+// only honors the run's config when it lists with --standalone.
+async function selectorDiscoveryInput(config: Record<string, unknown>) {
+  const input = { command: config.command, cwd: config.cwd, env: config.env };
+  const version = await detectOpenCodeCliVersion({
+    command: resolveOpenCodeCommand(input.command),
+    cwd: asString(input.cwd, process.cwd()),
+    env: normalizeEnv(ensurePathInEnv({ ...process.env, ...normalizeEnv(input.env) })),
+  });
+  return { ...input, standalone: openCodeCliUsesBackgroundService(version) };
 }
 
 /**
@@ -390,12 +394,13 @@ export async function listOpenCodeModels(
   context?: AdapterModelDiscoveryContext,
 ): Promise<AdapterModel[]> {
   if (context) {
-    return discoverOpenCodeModelsCached(discoveryInputFromContext(context)).catch((err) => {
+    const input = await selectorDiscoveryInput(context.config);
+    return discoverOpenCodeModelsCached(input).catch((err) => {
       throw conciseDiscoveryError(err);
     });
   }
   try {
-    return await discoverOpenCodeModelsCached();
+    return await discoverOpenCodeModelsCached(await selectorDiscoveryInput({}));
   } catch {
     return [];
   }
@@ -405,12 +410,13 @@ export async function refreshOpenCodeModels(
   context?: AdapterModelDiscoveryContext,
 ): Promise<AdapterModel[]> {
   if (context) {
-    return refreshOpenCodeModelsCached(discoveryInputFromContext(context)).catch((err) => {
+    const input = await selectorDiscoveryInput(context.config);
+    return refreshOpenCodeModelsCached(input).catch((err) => {
       throw conciseDiscoveryError(err);
     });
   }
   try {
-    return await refreshOpenCodeModelsCached({});
+    return await refreshOpenCodeModelsCached(await selectorDiscoveryInput({}));
   } catch {
     return [];
   }
