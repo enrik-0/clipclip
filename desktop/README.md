@@ -136,3 +136,4 @@ pnpm test
   proceso `postgres.exe` huérfano que impide el siguiente arranque ("pre-existing shared memory block is still in
   use"). El origen está en esa librería, no en esta app; se resuelve terminando ese proceso.
 <!-- rebuild: 5eb15d092 -->
+<!-- rebuild: 36dab0cd8 -->
