@@ -1,5 +1,46 @@
-import { describe, expect, it } from "vitest";
-import { mapSupportedModels } from "./sdk-models.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const sdk = vi.hoisted(() => ({ query: vi.fn() }));
+vi.mock("@anthropic-ai/claude-agent-sdk", () => sdk);
+
+import { fetchClaudeCodeModels, mapSupportedModels } from "./sdk-models.js";
+
+describe("fetchClaudeCodeModels", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    sdk.query.mockReset();
+  });
+
+  function stubQuery() {
+    const close = vi.fn();
+    sdk.query.mockReturnValue({
+      supportedModels: async () => [{ value: "opus", resolvedModel: "claude-opus-9", displayName: "Opus 9" }],
+      close,
+    });
+    return close;
+  }
+
+  it("runs isolated from user settings, hooks and MCP servers, and closes the process", async () => {
+    const close = stubQuery();
+    expect(await fetchClaudeCodeModels()).toEqual([{ id: "claude-opus-9", label: "Claude Opus 9" }]);
+    expect(sdk.query.mock.calls[0]![0].options).toMatchObject({
+      settingSources: [],
+      strictMcpConfig: true,
+      persistSession: false,
+    });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks the same executable ACP runs use: CLAUDE_CODE_EXECUTABLE, else the SDK built-in", async () => {
+    stubQuery();
+    vi.stubEnv("CLAUDE_CODE_EXECUTABLE", "");
+    await fetchClaudeCodeModels();
+    expect(sdk.query.mock.calls[0]![0].options.pathToClaudeCodeExecutable).toBeUndefined();
+    vi.stubEnv("CLAUDE_CODE_EXECUTABLE", "/opt/claude/claude");
+    await fetchClaudeCodeModels();
+    expect(sdk.query.mock.calls[1]![0].options.pathToClaudeCodeExecutable).toBe("/opt/claude/claude");
+  });
+});
 
 describe("mapSupportedModels", () => {
   it("uses versioned ids, drops the default row and dated snapshots, and dedupes", () => {

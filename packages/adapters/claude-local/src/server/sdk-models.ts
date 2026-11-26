@@ -35,7 +35,7 @@ export function mapSupportedModels(rows: unknown): AdapterModel[] {
 }
 
 /**
- * Ask the installed Claude Code which models it supports. Works with a subscription login:
+ * Ask Claude Code which models it supports. Works with a subscription login:
  * no API key and no prompt is sent, so it costs no tokens. Returns [] on any failure so the
  * caller can fall back to another source.
  */
@@ -52,7 +52,19 @@ export async function fetchClaudeCodeModels(): Promise<AdapterModel[]> {
     async function* prompt(): AsyncGenerator<never> {
       await idle;
     }
-    query = sdkQuery({ prompt: prompt(), options: { cwd: os.tmpdir() } });
+    query = sdkQuery({
+      prompt: prompt(),
+      options: {
+        cwd: os.tmpdir(),
+        // Listing models must not run the user's hooks, plugins or MCP servers.
+        settingSources: [],
+        strictMcpConfig: true,
+        persistSession: false,
+        // Same resolution as ACP runs (claude-agent-acp): this variable, else the built-in
+        // executable. The list must match what the executing binary can run.
+        pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_EXECUTABLE || undefined,
+      },
+    });
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error("timed out")), SDK_MODELS_TIMEOUT_MS);
     });

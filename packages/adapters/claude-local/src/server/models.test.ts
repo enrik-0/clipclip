@@ -130,6 +130,45 @@ describe("listClaudeModels without ANTHROPIC_API_KEY", () => {
     }
   });
 
+  it("retries after a few minutes, not on every request, when both sources fail", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+      await listClaudeModels();
+      await listClaudeModels();
+      expect(sdkModels.fetchClaudeCodeModels).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(6 * 60 * 1000);
+      await listClaudeModels();
+      expect(sdkModels.fetchClaudeCodeModels).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not keep a public catalog fallback for a whole day", async () => {
+    vi.useFakeTimers();
+    try {
+      mockCatalog(catalog);
+      await listClaudeModels();
+      vi.advanceTimersByTime(6 * 60 * 1000);
+      sdkModels.fetchClaudeCodeModels.mockResolvedValue([{ id: "claude-opus-11", label: "Claude Opus 11" }]);
+      expect(ids(await listClaudeModels())).toContain("claude-opus-11");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the Claude Code list instead of the public catalog if a refresh cannot reach it", async () => {
+    sdkModels.fetchClaudeCodeModels.mockResolvedValue([{ id: "claude-opus-11", label: "Claude Opus 11" }]);
+    await listClaudeModels();
+    sdkModels.fetchClaudeCodeModels.mockResolvedValue([]);
+    const fetchMock = mockCatalog(catalog);
+    const resultIds = ids(await refreshClaudeModels());
+    expect(resultIds).toContain("claude-opus-11");
+    expect(resultIds).not.toContain("claude-opus-9");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("keeps serving the last good catalog if a later refresh fails", async () => {
     mockCatalog(catalog);
     await listClaudeModels();

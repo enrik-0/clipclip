@@ -11,6 +11,7 @@ const ANTHROPIC_API_VERSION = "2023-06-01";
 const PUBLIC_CATALOG_URL = "https://models.dev/api.json";
 const PUBLIC_CATALOG_TIMEOUT_MS = 4000;
 const KEYLESS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const KEYLESS_RETRY_TTL_MS = 5 * 60 * 1000;
 
 /**
  * AWS Bedrock model IDs — region-qualified identifiers required by the Bedrock API. Listed in
@@ -34,7 +35,8 @@ const BEDROCK_MODELS: AdapterModel[] = [
   { id: "us.anthropic.claude-sonnet-4-5-20250929-v2:0", label: "Bedrock Sonnet 4.5" },
 ];
 
-let catalogCached: { url: string; expiresAt: number; models: AdapterModel[] } | null = null;
+let catalogCached: { url: string; expiresAt: number; models: AdapterModel[]; fromClaudeCode: boolean } | null =
+  null;
 let cached: { keyFingerprint: string; baseUrl: string; expiresAt: number; models: AdapterModel[] } | null = null;
 
 function isBedrockEnv(): boolean {
@@ -161,8 +163,9 @@ async function fetchPublicCatalogModels(url: string): Promise<AdapterModel[]> {
 let keylessInFlight: Promise<AdapterModel[]> | null = null;
 
 /**
- * Without an API key: ask the installed Claude Code first (it only lists what this install
- * supports), then the public catalog, then the fixed list.
+ * Without an API key: ask Claude Code first (it only lists what that executable supports),
+ * then the public catalog, then the fixed list. Only a Claude Code answer is cached for a day;
+ * anything degraded is retried after a few minutes.
  */
 async function loadKeylessModels(forceRefresh: boolean): Promise<AdapterModel[]> {
   const url = resolveCatalogUrl();
@@ -172,15 +175,23 @@ async function loadKeylessModels(forceRefresh: boolean): Promise<AdapterModel[]>
   }
   if (keylessInFlight) return keylessInFlight;
   keylessInFlight = (async () => {
-    let fetched = await fetchClaudeCodeModels();
-    if (fetched.length === 0) fetched = await fetchPublicCatalogModels(url);
-    if (fetched.length > 0) {
-      const merged = mergedWithFallback(fetched);
-      catalogCached = { url, expiresAt: Date.now() + KEYLESS_CACHE_TTL_MS, models: merged };
-      return merged;
+    const remember = (models: AdapterModel[], fromClaudeCode: boolean) => {
+      const ttl = fromClaudeCode ? KEYLESS_CACHE_TTL_MS : KEYLESS_RETRY_TTL_MS;
+      catalogCached = { url, expiresAt: Date.now() + ttl, models, fromClaudeCode };
+      return models;
+    };
+    const previous = catalogCached?.url === url ? catalogCached : null;
+
+    const reported = await fetchClaudeCodeModels();
+    if (reported.length > 0) return remember(mergedWithFallback(reported), true);
+    // A Claude Code answer we already have is better than the public catalog.
+    if (previous?.fromClaudeCode) {
+      catalogCached = { ...previous, expiresAt: Date.now() + KEYLESS_RETRY_TTL_MS };
+      return previous.models;
     }
-    if (catalogCached && catalogCached.url === url) return catalogCached.models;
-    return sortClaudeModels(dedupeModels(DIRECT_MODELS));
+    const published = await fetchPublicCatalogModels(url);
+    if (published.length > 0) return remember(mergedWithFallback(published), false);
+    return remember(previous?.models ?? sortClaudeModels(dedupeModels(DIRECT_MODELS)), false);
   })().finally(() => {
     keylessInFlight = null;
   });
