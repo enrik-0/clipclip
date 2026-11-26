@@ -59,6 +59,7 @@ import { CLAUDE_HELLO_PROBE_PROMPT } from "./probe-prompt.js";
 import { detectClaudeLoginRequired, extractClaudeRetryNotBefore, isClaudeProviderQuotaError, parseClaudeStreamJson } from "./parse.js";
 import { buildClaudeProbePermissionArgs, claudeSandboxPermissionEnv } from "./permissions.js";
 import { ADAPTER_AUTH_MISSING_CHECK_CODE } from "./auth-check.js";
+import { resolveInstalledClaude } from "./claude-executable.js";
 import { resolveClaudeModel, SANDBOX_INSTALL_COMMAND } from "../index.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -80,7 +81,10 @@ type ClaudeEngineResolutionInput =
 type ClaudeAcpExecutorOptions = Omit<
   AcpxEngineExecutorOptions,
   "adapterType" | "moduleDir" | "packageRootDir"
->;
+> & {
+  /** Test seam for locating the installed Claude Code. */
+  resolveClaudeExecutable?: typeof resolveInstalledClaude;
+};
 
 type ClaudeAcpExecutor = (ctx: AdapterExecutionContext) => Promise<AdapterExecutionResult>;
 
@@ -432,22 +436,50 @@ export function mapClaudeAcpAuthErrorCode(
   };
 }
 
+/**
+ * Point a local ACP run at the operator's installed Claude Code, the same executable the model
+ * picker asks. `acpx` already does this on Windows; elsewhere `claude-agent-acp` would run the
+ * SDK built-in executable. An agent that sets its own executable or ACP server command is left
+ * alone.
+ */
+async function withInstalledClaude(
+  config: Record<string, unknown>,
+  resolveClaudeExecutable: typeof resolveInstalledClaude,
+): Promise<Record<string, unknown>> {
+  if (firstNonEmptyString(config.agentCommand, config.acpAgentCommand)) return config;
+  const env = parseObject(config.env);
+  if (firstNonEmptyString(env.CLAUDE_CODE_EXECUTABLE)) return config;
+  const agentEnv = Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  );
+  const executable = await resolveClaudeExecutable({
+    command: firstNonEmptyString(config.command),
+    env: { ...process.env, ...agentEnv },
+    cwd: firstNonEmptyString(config.cwd),
+  });
+  return executable ? { ...config, env: { ...env, CLAUDE_CODE_EXECUTABLE: executable } } : config;
+}
+
 export function createClaudeAcpExecutor(options: ClaudeAcpExecutorOptions = {}): ClaudeAcpExecutor {
+  const { resolveClaudeExecutable = resolveInstalledClaude, ...engineOptions } = options;
   let executor: ClaudeAcpExecutor | null = null;
   return async (ctx) => {
     let currentExecutor = executor;
     if (!currentExecutor) {
       const { createAcpxEngineExecutor } = await import("@paperclipai/adapter-utils/acpx-engine/execute");
-      currentExecutor = createAcpxEngineExecutor(withClaudeAcpDefaults(options));
+      currentExecutor = createAcpxEngineExecutor(withClaudeAcpDefaults(engineOptions));
       executor = currentExecutor;
     }
     const target = readAdapterExecutionTarget({
       executionTarget: ctx.executionTarget,
       legacyRemoteExecution: ctx.executionTransport?.remoteExecution,
     });
+    // A host path means nothing on a remote target.
+    const remote = target?.kind === "remote";
+    const config = remote ? ctx.config : await withInstalledClaude(ctx.config, resolveClaudeExecutable);
     const result = await currentExecutor({
       ...ctx,
-      config: buildClaudeAcpConfig(ctx.config, target?.kind === "remote" ? {} : process.env),
+      config: buildClaudeAcpConfig(config, remote ? {} : process.env),
     });
     return mapClaudeAcpAuthErrorCode(result);
   };

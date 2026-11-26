@@ -28,7 +28,7 @@ import {
 import { companySkillService } from "./company-skills.js";
 import { routineService } from "./routines.js";
 import { accessService } from "./access.js";
-import { listAdapterModels } from "../adapters/registry.js";
+import { findActiveServerAdapter, listAdapterModels } from "../adapters/registry.js";
 import {
   resourceStatus,
   stableJson,
@@ -757,7 +757,11 @@ async function assertKnownBuiltInAgentModel(
   const model = typeof adapterConfig.model === "string" ? adapterConfig.model.trim() : "";
   if (!model || !hasCompleteAdapterConfig(adapterType, adapterConfig)) return;
 
-  const models = await listAdapterModels(agentHarnessType(adapterType, adapterConfig));
+  const harnessType = agentHarnessType(adapterType, adapterConfig);
+  const listed = await listAdapterModels(harnessType);
+  // Claude Code runs models that it no longer lists, so the fixed list stays valid too.
+  const fixed = harnessType === "claude_local" ? findActiveServerAdapter(harnessType)?.models ?? [] : [];
+  const models = [...listed, ...fixed.filter((entry) => !listed.some((candidate) => candidate.id === entry.id))];
   if (models.length === 0 || models.some((candidate) => candidate.id === model)) return;
 
   throw unprocessable(`Model "${model}" is not available for adapter ${adapterType}.`, {

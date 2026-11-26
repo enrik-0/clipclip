@@ -59,8 +59,11 @@ describe("adapter model listing", () => {
   });
 
   it("returns claude fallback models including the latest Opus alias when no Anthropic key is available", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    // No Claude Code to ask and no public catalog: only the fixed list is left.
+    vi.stubEnv("CLAUDE_CODE_EXECUTABLE", "/nonexistent/claude");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
     const models = await listAdapterModels("claude_local");
+    vi.unstubAllEnvs();
 
     expect(models).toEqual(claudeFallbackModels);
     expect(models.some((model) => model.id === "claude-opus-4-8")).toBe(true);
@@ -74,7 +77,8 @@ describe("adapter model listing", () => {
     expect(models.some((model) => model.id === "claude-opus-5")).toBe(true);
     expect(models).toContainEqual({ id: "claude-opus-5-5", label: "Claude Opus 5.5" });
     expect(models).toContainEqual({ id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" });
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // Without a key the Anthropic API is never called; only the public catalog is tried.
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).toEqual(["https://models.dev/api.json"]);
   });
 
   it("loads claude models dynamically and merges fallback options", async () => {

@@ -2,11 +2,16 @@ import { createHash } from "node:crypto";
 import type { AdapterModel } from "@paperclipai/adapter-utils";
 import { models as DIRECT_MODELS } from "../index.js";
 import { sortClaudeModels } from "./model-order.js";
+import { fetchClaudeCodeModels } from "./sdk-models.js";
 
 const ANTHROPIC_MODELS_ENDPOINT = "/v1/models";
 const ANTHROPIC_MODELS_TIMEOUT_MS = 5000;
 const ANTHROPIC_MODELS_CACHE_TTL_MS = 60_000;
 const ANTHROPIC_API_VERSION = "2023-06-01";
+const PUBLIC_CATALOG_URL = "https://models.dev/api.json";
+const PUBLIC_CATALOG_TIMEOUT_MS = 4000;
+const KEYLESS_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const KEYLESS_RETRY_TTL_MS = 5 * 60 * 1000;
 
 /**
  * AWS Bedrock model IDs — region-qualified identifiers required by the Bedrock API. Listed in
@@ -30,6 +35,8 @@ const BEDROCK_MODELS: AdapterModel[] = [
   { id: "us.anthropic.claude-sonnet-4-5-20250929-v2:0", label: "Bedrock Sonnet 4.5" },
 ];
 
+let catalogCached: { url: string; expiresAt: number; models: AdapterModel[]; fromClaudeCode: boolean } | null =
+  null;
 let cached: { keyFingerprint: string; baseUrl: string; expiresAt: number; models: AdapterModel[] } | null = null;
 
 function isBedrockEnv(): boolean {
@@ -116,12 +123,88 @@ async function fetchAnthropicModels(apiKey: string, baseUrl: string): Promise<Ad
   }
 }
 
+function resolveCatalogUrl(): string {
+  const url = process.env.PAPERCLIP_CLAUDE_MODELS_CATALOG_URL?.trim();
+  return url && url.length > 0 ? url : PUBLIC_CATALOG_URL;
+}
+
+/**
+ * Public models.dev catalog (no API key needed). Only the `anthropic` provider's bare `claude-*`
+ * aliases are kept: dated snapshots (`-20251001`) would only duplicate the alias in the picker.
+ */
+async function fetchPublicCatalogModels(url: string): Promise<AdapterModel[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), PUBLIC_CATALOG_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) return [];
+    const payload = (await response.json()) as { anthropic?: { models?: unknown } } | null;
+    const raw = payload?.anthropic?.models;
+    if (typeof raw !== "object" || raw === null) return [];
+    const models: AdapterModel[] = [];
+    for (const [key, value] of Object.entries(raw)) {
+      const record = (typeof value === "object" && value !== null ? value : {}) as { id?: unknown; name?: unknown };
+      const id = typeof record.id === "string" ? record.id.trim() : key.trim();
+      if (!id.startsWith("claude-") || /-\d{8}$/.test(id) || id.endsWith("-latest")) continue;
+      const name = typeof record.name === "string" && record.name.trim().length > 0 ? record.name.trim() : id;
+      models.push({ id, label: name });
+    }
+    return dedupeModels(models);
+  } catch (error) {
+    console.warn("[paperclip] Claude public model catalog failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+let keylessInFlight: Promise<AdapterModel[]> | null = null;
+
+/**
+ * Without an API key: ask Claude Code first and show exactly its list. If it gives none, use the
+ * public catalog merged with the fixed list, then the fixed list alone. Only a Claude Code answer
+ * is cached for a day; anything degraded is retried after a few minutes.
+ */
+async function loadKeylessModels(forceRefresh: boolean): Promise<AdapterModel[]> {
+  const url = resolveCatalogUrl();
+  const now = Date.now();
+  if (!forceRefresh && catalogCached && catalogCached.url === url && catalogCached.expiresAt > now) {
+    return catalogCached.models;
+  }
+  if (keylessInFlight) return keylessInFlight;
+  keylessInFlight = (async () => {
+    const remember = (models: AdapterModel[], fromClaudeCode: boolean) => {
+      const ttl = fromClaudeCode ? KEYLESS_CACHE_TTL_MS : KEYLESS_RETRY_TTL_MS;
+      catalogCached = { url, expiresAt: Date.now() + ttl, models, fromClaudeCode };
+      return models;
+    };
+    const previous = catalogCached?.url === url ? catalogCached : null;
+
+    const reported = await fetchClaudeCodeModels();
+    // Exactly what Claude Code reports: a model it does not support is not offered.
+    if (reported.length > 0) return remember(sortClaudeModels(dedupeModels(reported)), true);
+    // A Claude Code answer we already have is better than the public catalog.
+    if (previous?.fromClaudeCode) {
+      catalogCached = { ...previous, expiresAt: Date.now() + KEYLESS_RETRY_TTL_MS };
+      return previous.models;
+    }
+    const published = await fetchPublicCatalogModels(url);
+    if (published.length > 0) return remember(mergedWithFallback(published), false);
+    return remember(previous?.models ?? sortClaudeModels(dedupeModels(DIRECT_MODELS)), false);
+  })().finally(() => {
+    keylessInFlight = null;
+  });
+  return keylessInFlight;
+}
+
 async function loadClaudeModels(options?: { forceRefresh?: boolean }): Promise<AdapterModel[]> {
   if (isBedrockEnv()) return sortClaudeModels(dedupeModels(BEDROCK_MODELS));
 
   const fallback = sortClaudeModels(dedupeModels(DIRECT_MODELS));
   const apiKey = resolveAnthropicApiKey();
-  if (!apiKey) return fallback;
+  if (!apiKey) return loadKeylessModels(options?.forceRefresh === true);
 
   const now = Date.now();
   const baseUrl = resolveAnthropicBaseUrl();
@@ -170,6 +253,8 @@ export async function refreshClaudeModels(): Promise<AdapterModel[]> {
 
 export function resetClaudeModelsCacheForTests() {
   cached = null;
+  catalogCached = null;
+  keylessInFlight = null;
 }
 
 /** Check whether a model ID is a Bedrock-native identifier (not an Anthropic API short name). */
