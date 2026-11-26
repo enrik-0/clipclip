@@ -60,9 +60,9 @@ export async function fetchClaudeCodeModels(): Promise<AdapterModel[]> {
         settingSources: [],
         strictMcpConfig: true,
         persistSession: false,
-        // Same resolution as ACP runs (claude-agent-acp): this variable, else the built-in
-        // executable. The list must match what the executing binary can run.
-        pathToClaudeCodeExecutable: process.env.CLAUDE_CODE_EXECUTABLE || undefined,
+        // No pathToClaudeCodeExecutable: default ACP runs use the SDK built-in executable
+        // (they do not inherit CLAUDE_CODE_EXECUTABLE from the server), and the list must
+        // match what runs can execute.
       },
     });
     const timeout = new Promise<never>((_, reject) => {

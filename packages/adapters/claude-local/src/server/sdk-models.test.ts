@@ -31,14 +31,13 @@ describe("fetchClaudeCodeModels", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("asks the same executable ACP runs use: CLAUDE_CODE_EXECUTABLE, else the SDK built-in", async () => {
+  it("asks the SDK built-in executable even if the server sets CLAUDE_CODE_EXECUTABLE", async () => {
+    // ACP runs only inherit a closed set of server variables, and this is not one of them, so
+    // listing from that path would offer models the runs cannot execute.
     stubQuery();
-    vi.stubEnv("CLAUDE_CODE_EXECUTABLE", "");
-    await fetchClaudeCodeModels();
-    expect(sdk.query.mock.calls[0]![0].options.pathToClaudeCodeExecutable).toBeUndefined();
     vi.stubEnv("CLAUDE_CODE_EXECUTABLE", "/opt/claude/claude");
     await fetchClaudeCodeModels();
-    expect(sdk.query.mock.calls[1]![0].options.pathToClaudeCodeExecutable).toBe("/opt/claude/claude");
+    expect(sdk.query.mock.calls[0]![0].options.pathToClaudeCodeExecutable).toBeUndefined();
   });
 });
 

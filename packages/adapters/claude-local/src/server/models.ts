@@ -163,9 +163,9 @@ async function fetchPublicCatalogModels(url: string): Promise<AdapterModel[]> {
 let keylessInFlight: Promise<AdapterModel[]> | null = null;
 
 /**
- * Without an API key: ask Claude Code first (it only lists what that executable supports),
- * then the public catalog, then the fixed list. Only a Claude Code answer is cached for a day;
- * anything degraded is retried after a few minutes.
+ * Without an API key: ask Claude Code first, then the public catalog, then the fixed list.
+ * The result is always merged with the fixed list. Only a Claude Code answer is cached for a
+ * day; anything degraded is retried after a few minutes.
  */
 async function loadKeylessModels(forceRefresh: boolean): Promise<AdapterModel[]> {
   const url = resolveCatalogUrl();
