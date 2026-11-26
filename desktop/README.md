@@ -135,3 +135,4 @@ pnpm test
 - En Windows, la librería del Postgres embebido lo detiene con `taskkill /f`. De forma intermitente puede quedar un
   proceso `postgres.exe` huérfano que impide el siguiente arranque ("pre-existing shared memory block is still in
   use"). El origen está en esa librería, no en esta app; se resuelve terminando ese proceso.
+<!-- rebuild: 5eb15d092 -->
