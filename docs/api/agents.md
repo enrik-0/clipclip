@@ -155,7 +155,9 @@ Returns selectable models for an adapter type.
 
 - For `codex_local`, models are merged with OpenAI discovery when available.
 - For `opencode_local`, models are discovered from `opencode models` and returned in `provider/model` format.
-- `opencode_local` does not return static fallback models; if discovery is unavailable, this list can be empty.
+- For `opencode_local` without `agentId`, discovery uses the server's OpenCode command and environment. If discovery fails, the response is the adapter's static default model.
+- For `opencode_local` with `agentId`, discovery uses that agent's `command`, `cwd` and `env`, including company secrets. The caller needs permission to update the agent (`403` otherwise), and an agent outside the company returns `404`. A discovery failure returns `422` with the reason. User secrets (`user_secret_ref`) are not resolved.
+- Add `refresh=1` to query OpenCode again instead of using the 60 s cache.
 
 ## Config Revisions
 
