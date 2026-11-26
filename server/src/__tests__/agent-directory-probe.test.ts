@@ -17,7 +17,19 @@ describe("stable live agent directory observation", () => {
     fs.writeFileSync(join(root, "AGENTS.md"), "Instructions\n");
     fs.writeFileSync(join(root, "notes", "memory.bin"), Buffer.from([0, 1, 255]));
   });
-  afterEach(() => { vi.restoreAllMocks(); fs.rmSync(root, { recursive: true, force: true }); });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); fs.rmSync(root, { recursive: true, force: true }); });
+  it("keeps the desktop app in Node mode for the probe child", async () => {
+    // The packaged desktop app runs the server with its own executable. Without
+    // this switch the probe child starts a second app instead of Node.
+    vi.stubEnv("ELECTRON_RUN_AS_NODE", "1");
+    const spy = vi.spyOn(childProcess, "execFile").mockImplementation(((...args: unknown[]) => {
+      const done = args[args.length - 1] as (error: null, stdout: string, stderr: string) => void;
+      done(null, JSON.stringify({ digest: "a".repeat(64), identity: "1:2:3" }), "");
+      return {};
+    }) as never);
+    await observeLocalAgentDirectory(root);
+    expect(spy.mock.calls[0]![2]).toMatchObject({ env: { ELECTRON_RUN_AS_NODE: "1" } });
+  });
   function productionPrograms(): { probe: string; cleanup: string } {
     // Product/dev starts the server with tsx. Vitest's own transform does not
     // reproduce the lexical helpers injected into function.toString() there.

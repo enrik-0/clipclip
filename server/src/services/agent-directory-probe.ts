@@ -156,9 +156,13 @@ export const agentDirectoryTransferCleanupProgram = `${childNameHelper} const re
 
 /** Bound child: no shell, inherited credentials, or event-loop hashing. */
 export async function observeLocalAgentDirectory(root: string) {
+  // The packaged desktop app runs the server with its own executable. Without
+  // this switch the child starts a second app instead of running the program.
+  const nodeMode = process.env.ELECTRON_RUN_AS_NODE;
+  const env: NodeJS.ProcessEnv = nodeMode ? { ELECTRON_RUN_AS_NODE: nodeMode } : {};
   const result = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
     childProcess.execFile(process.execPath, ["-e", agentDirectoryProbeProgram, root], {
-      cwd: root, env: {}, timeout: 10_000, maxBuffer: 1024, killSignal: "SIGKILL", encoding: "utf8",
+      cwd: root, env, timeout: 10_000, maxBuffer: 1024, killSignal: "SIGKILL", encoding: "utf8",
     }, (error, stdout, stderr) => { if (error) reject(error); else resolve({ stdout, stderr }); });
   });
   if (result.stdout.length > 1024) throw new Error("Agent directory observation exceeds bound");
