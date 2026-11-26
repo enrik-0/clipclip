@@ -190,6 +190,7 @@ async function runExecutor(
     runtimeMcp?: AdapterRuntimeMcpAccess;
     prepareRemoteManagedHome?: AcpxEngineExecutorOptions["prepareRemoteManagedHome"];
     startupTraceContext?: AdapterExecutionContext["startupTraceContext"];
+    packageRootDir?: string;
   } = {},
 ) {
   // Skill reconciliation must never inspect or modify the developer's real
@@ -211,6 +212,7 @@ async function runExecutor(
     ...(options.prepareRemoteManagedHome
       ? { prepareRemoteManagedHome: options.prepareRemoteManagedHome }
       : {}),
+    ...(options.packageRootDir ? { packageRootDir: options.packageRootDir } : {}),
     createRuntime: (options) => {
       runtimeOptions.push(options as unknown as Record<string, unknown>);
       return buildRuntime(
@@ -9134,4 +9136,38 @@ describe("ACPX startup handshake guard and late-completion fence", () => {
       vi.useRealTimers();
     }
   }, 10000);
+});
+
+describe("built-in agent launch inside the packaged desktop app", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  // The desktop app runs the server with its own executable in Node mode. The
+  // agent child only gets an allowlisted env, so without the switch it would
+  // start a second desktop app instead of Node.
+  it.runIf(process.platform === "win32")(
+    "runs the package script with the current runtime and keeps it in Node mode",
+    async () => {
+      vi.stubEnv("ELECTRON_RUN_AS_NODE", "1");
+      const root = await makeTempRoot();
+      const install = path.join(root, "Paperclip Desktop");
+      const packageDir = path.join(install, "node_modules", "@agentclientprotocol", "claude-agent-acp");
+      const script = path.join(packageDir, "dist", "index.js");
+      await fs.mkdir(path.dirname(script), { recursive: true });
+      await fs.mkdir(path.join(install, "node_modules", ".bin"), { recursive: true });
+      await fs.writeFile(path.join(install, "node_modules", ".bin", "claude-agent-acp.cmd"), "");
+      await fs.writeFile(script, "");
+      await fs.writeFile(path.join(packageDir, "package.json"), JSON.stringify({ bin: { "claude-agent-acp": "dist/index.js" } }));
+      vi.stubEnv("PAPERCLIP_HOME", path.join(root, "home"));
+
+      const run = await runExecutor(
+        { agent: "claude", cwd: root, stateDir: path.join(root, "state") },
+        { packageRootDir: install },
+      );
+
+      const env = (run.sessionInputs[0]!.sessionOptions as { env: Record<string, string> }).env;
+      expect(env.ELECTRON_RUN_AS_NODE).toBe("1");
+      const registry = run.runtimeOptions[0]!.agentRegistry as { resolve(name: string): string | string[] };
+      expect(String(registry.resolve("claude"))).toContain(script.replaceAll("\\", "/"));
+    },
+  );
 });

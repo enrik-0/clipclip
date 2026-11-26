@@ -873,6 +873,8 @@ export async function findAncestorBin(startDir: string, binName: string): Promis
 interface BuiltInAgentCommand {
   command: string;
   shellCommand: string;
+  /** Extra launch env the command needs on this host. */
+  env?: Record<string, string>;
 }
 
 async function resolveBuiltInAgentCommand(input: {
@@ -897,7 +899,17 @@ async function resolveBuiltInAgentCommand(input: {
   const resolved = (await findAncestorBin(packageRootDir, binName)) ?? binName;
   if (process.platform === "win32") {
     const nodeCommand = await resolveWindowsNodeLaunchCommand(resolved, binName);
-    if (nodeCommand) return { command: nodeCommand, shellCommand: nodeCommand };
+    if (nodeCommand) {
+      // In the packaged desktop app `process.execPath` is the app itself. The
+      // child env is allowlisted, so pass the Node-mode switch explicitly or it
+      // starts a second app instead of running the script.
+      const nodeMode = process.env.ELECTRON_RUN_AS_NODE;
+      return {
+        command: nodeCommand,
+        shellCommand: nodeCommand,
+        ...(nodeMode ? { env: { ELECTRON_RUN_AS_NODE: nodeMode } } : {}),
+      };
+    }
   }
   return { command: resolved, shellCommand: shellQuote(resolved) };
 }
@@ -2233,6 +2245,7 @@ async function buildRuntime(input: {
     packageRootDir: input.engine.packageRootDir,
     executionTargetIsRemote,
   });
+  if (!configuredCommand && builtInCommand?.env) Object.assign(env, builtInCommand.env);
   let agentCommand = configuredCommand || builtInCommand?.command || null;
   let agentCommandShell = configuredCommand || builtInCommand?.shellCommand || "";
   // A runner-backed remote sandbox is the only lane that crosses the staging
