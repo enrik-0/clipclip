@@ -4,7 +4,18 @@
  * engine builds agent commands as strings (shared with POSIX shell launches), so
  * Windows runs convert them to argv at the registry boundary.
  */
+import { statSync } from "node:fs";
 import { createRequire } from "node:module";
+import path from "node:path";
+
+function isExistingFile(candidate: string): boolean {
+  if (!path.isAbsolute(candidate)) return false;
+  try {
+    return statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Split a command line into argv. Honors single and double quotes. Backslashes
@@ -65,6 +76,9 @@ export function resolveAgentRegistryOverride(
   const trimmed = command?.trim();
   if (!trimmed) return undefined;
   if (platform !== "win32" || !acceptsArgv) return trimmed;
+  // The built-in agent bin arrives unquoted and its install folder can contain
+  // spaces ("Paperclip Desktop"). Never split a path that names a real file.
+  if (isExistingFile(trimmed)) return [trimmed];
   const argv = splitAgentCommandToArgv(trimmed);
   return argv.length > 0 ? argv : undefined;
 }

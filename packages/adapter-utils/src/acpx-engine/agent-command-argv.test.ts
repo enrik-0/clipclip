@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { acpxRegistryAcceptsArgv, resolveAgentRegistryOverride, splitAgentCommandToArgv } from "./agent-command-argv.js";
 
@@ -29,6 +32,19 @@ describe("resolveAgentRegistryOverride", () => {
 
   it("returns an argv array on Windows because acpx rejects raw command strings there", () => {
     expect(resolveAgentRegistryOverride("gemini --acp", "win32", true)).toEqual(["gemini", "--acp"]);
+  });
+
+  it("keeps an unquoted executable path with spaces as a single argv entry", () => {
+    // The built-in agent bin resolves to a bare path, and the Windows installer
+    // puts it under "...\\Paperclip Desktop\\...".
+    const dir = mkdtempSync(path.join(tmpdir(), "paperclip argv "));
+    try {
+      const bin = path.join(dir, "claude-agent-acp.cmd");
+      writeFileSync(bin, "");
+      expect(resolveAgentRegistryOverride(bin, "win32", true)).toEqual([bin]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("keeps the raw string on Windows when the resolved acpx predates argv overrides", () => {
