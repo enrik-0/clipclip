@@ -1,8 +1,13 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { acpxRegistryAcceptsArgv, resolveAgentRegistryOverride, splitAgentCommandToArgv } from "./agent-command-argv.js";
+import {
+  acpxRegistryAcceptsArgv,
+  resolveAgentRegistryOverride,
+  resolveWindowsNodeLaunchCommand,
+  splitAgentCommandToArgv,
+} from "./agent-command-argv.js";
 
 describe("splitAgentCommandToArgv", () => {
   it("splits plain whitespace-separated tokens", () => {
@@ -22,6 +27,37 @@ describe("splitAgentCommandToArgv", () => {
     expect(splitAgentCommandToArgv("C:\\repo\\node_modules\\.bin\\claude-agent-acp.cmd")).toEqual([
       "C:\\repo\\node_modules\\.bin\\claude-agent-acp.cmd",
     ]);
+  });
+});
+
+describe("resolveWindowsNodeLaunchCommand", () => {
+  function withInstall(run: (bin: string, script: string) => Promise<void>) {
+    const root = mkdtempSync(path.join(tmpdir(), "Paperclip Desktop "));
+    const packageDir = path.join(root, "node_modules", "@agentclientprotocol", "claude-agent-acp");
+    const bin = path.join(root, "node_modules", ".bin", "claude-agent-acp.cmd");
+    const script = path.join(packageDir, "dist", "index.js");
+    mkdirSync(path.dirname(script), { recursive: true });
+    mkdirSync(path.dirname(bin), { recursive: true });
+    writeFileSync(bin, "");
+    writeFileSync(script, "");
+    writeFileSync(path.join(packageDir, "package.json"), JSON.stringify({ bin: { "claude-agent-acp": "dist/index.js" } }));
+    return run(bin, script).finally(() => rmSync(root, { recursive: true, force: true }));
+  }
+
+  // acpx 0.12 cannot launch a .cmd shim whose path has spaces, quoted or not.
+  it("launches the package script with node so that spaces survive both acpx lines", () =>
+    withInstall(async (bin, script) => {
+      const node = "C:\\Program Files\\nodejs\\node.exe";
+      const command = await resolveWindowsNodeLaunchCommand(bin, "claude-agent-acp", node);
+      expect(command).toBe(`"C:/Program Files/nodejs/node.exe" "${script.replaceAll("\\", "/")}"`);
+      expect(resolveAgentRegistryOverride(command, "win32", true)).toEqual([
+        "C:/Program Files/nodejs/node.exe",
+        script.replaceAll("\\", "/"),
+      ]);
+    }));
+
+  it("returns null when the package script cannot be found", async () => {
+    await expect(resolveWindowsNodeLaunchCommand("claude-agent-acp", "claude-agent-acp", "node.exe")).resolves.toBeNull();
   });
 });
 

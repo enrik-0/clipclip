@@ -5,6 +5,7 @@
  * Windows runs convert them to argv at the registry boundary.
  */
 import { statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -48,6 +49,36 @@ export function splitAgentCommandToArgv(command: string): string[] {
   }
   if (inToken) argv.push(current);
   return argv;
+}
+
+/**
+ * Windows launch command for a built-in agent package: node plus the package's
+ * own script, instead of the `node_modules/.bin/*.cmd` shim. acpx runs a `.cmd`
+ * through `cmd.exe` and 0.12 does not quote its path, so an install folder with
+ * spaces ("Paperclip Desktop") fails to start. Returns null when the script is
+ * not next to the shim, so the caller keeps its previous command.
+ */
+export async function resolveWindowsNodeLaunchCommand(
+  binPath: string,
+  binName: string,
+  nodePath: string = process.execPath,
+): Promise<string | null> {
+  if (!path.isAbsolute(binPath)) return null;
+  const packageDir = path.join(path.dirname(path.dirname(binPath)), "@agentclientprotocol", binName);
+  try {
+    const manifest = JSON.parse(await readFile(path.join(packageDir, "package.json"), "utf8")) as {
+      bin?: string | Record<string, string>;
+    };
+    const relative = typeof manifest.bin === "string" ? manifest.bin : manifest.bin?.[binName];
+    if (!relative) return null;
+    const script = path.join(packageDir, relative);
+    if (!isExistingFile(script)) return null;
+    // Forward slashes and double quotes parse the same in acpx 0.12 and in
+    // splitAgentCommandToArgv.
+    return [nodePath, script].map((part) => JSON.stringify(part.replaceAll("\\", "/"))).join(" ");
+  } catch {
+    return null;
+  }
 }
 
 /**
