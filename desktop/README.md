@@ -130,6 +130,8 @@ pnpm test
 ## Limitaciones conocidas
 
 - No hay firma de código (SmartScreen avisará al instalar).
+<!-- Rama temporal: este cambio solo dispara la compilación del instalador para el e2e del issue 32. -->
+
 - En Windows, la librería del Postgres embebido lo detiene con `taskkill /f`. De forma intermitente puede quedar un
   proceso `postgres.exe` huérfano que impide el siguiente arranque ("pre-existing shared memory block is still in
   use"). El origen está en esa librería, no en esta app; se resuelve terminando ese proceso.
