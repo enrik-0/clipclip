@@ -250,13 +250,11 @@ async function refreshOpenCodeModelsCached(input: {
   // models.dev cache. Its stdout is a confirmation message, not the refreshed
   // catalog, so enumerate once more after the refresh under the exact same
   // command/cwd/env before deciding whether the configured model exists.
-  await discoverOpenCodeModels({
-    command,
-    cwd,
-    env,
-    refresh: true,
-    standalone,
-  });
+  // OpenCode 2.x (2.3.0) rejects `--refresh` as an unrecognized flag. There,
+  // refreshing means listing again with a private server, past our own cache.
+  if (!standalone) {
+    await discoverOpenCodeModels({ command, cwd, env, refresh: true });
+  }
   const models = await discoverOpenCodeModels({ command, cwd, env, standalone });
   if (models.length > 0) {
     discoveryCache.set(discoveryCacheKey(command, cwd, env, standalone), {

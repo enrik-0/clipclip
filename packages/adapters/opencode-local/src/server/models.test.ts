@@ -385,11 +385,38 @@ describe("openCode models", () => {
       expect(modelCalls(spy).map((call) => call[2])).toEqual([["models", "--standalone"]]);
     });
 
-    it("refreshes with --standalone on OpenCode 2.x", async () => {
-      const spy = mockCli("2.0.1", "Models cache refreshed\n", "openai/gpt-5\n");
-      await refreshOpenCodeModels({ config: { command: "opencode" } });
+    // `opencode models --refresh` is an "Unrecognized flag" error on 2.3.0.
+    it("refreshes on OpenCode 2.x by listing again, without --refresh, past the 60s cache", async () => {
+      const spy = mockCli("opencode v2.3.0", "openai/old\n", "openai/new\n");
+      const context = { config: { command: "opencode" } };
+
+      await listOpenCodeModels(context);
+      await expect(refreshOpenCodeModels(context)).resolves.toEqual([
+        { id: "openai/new", label: "openai/new" },
+      ]);
+      // The refreshed catalog replaces the cached one.
+      await expect(listOpenCodeModels(context)).resolves.toEqual([
+        { id: "openai/new", label: "openai/new" },
+      ]);
+
       expect(modelCalls(spy).map((call) => call[2])).toEqual([
-        ["models", "--refresh", "--standalone"],
+        ["models", "--standalone"],
+        ["models", "--standalone"],
+      ]);
+    });
+
+    it("never passes --refresh when a 2.x run rechecks a missing model", async () => {
+      const spy = mockCli("2.3.0", "openai/old\n", "openai/old\nopenai/wanted\n");
+
+      await expect(
+        ensureOpenCodeModelConfiguredAndAvailable({
+          model: "openai/wanted",
+          standalone: true,
+        }),
+      ).resolves.toContainEqual({ id: "openai/wanted", label: "openai/wanted" });
+
+      expect(modelCalls(spy).map((call) => call[2])).toEqual([
+        ["models", "--standalone"],
         ["models", "--standalone"],
       ]);
     });
