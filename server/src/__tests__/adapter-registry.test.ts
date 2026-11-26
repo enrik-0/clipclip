@@ -489,7 +489,13 @@ describe("server adapter registry", () => {
     expect(setOverridePaused("claude_local", true)).toBe(true);
 
     expect(findActiveServerAdapter("claude_local")).not.toBe(plugin);
+    // No Claude Code to ask and no public catalog: the built-in adapter offers its fixed list.
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    vi.stubEnv("CLAUDE_CODE_EXECUTABLE", "/nonexistent/claude");
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("offline"); }));
     expect(await listAdapterModels("claude_local")).toEqual(builtIn?.models ?? []);
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     expect(await detectAdapterModel("claude_local")).toBeNull();
     expect(detectModel).toHaveBeenCalledTimes(1);
   });

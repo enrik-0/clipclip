@@ -3,6 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const sdk = vi.hoisted(() => ({ query: vi.fn() }));
 vi.mock("@anthropic-ai/claude-agent-sdk", () => sdk);
 
+const installed = vi.hoisted(() => ({ resolveInstalledClaude: vi.fn() }));
+vi.mock("./claude-executable.js", () => installed);
+
 import { fetchClaudeCodeModels, mapSupportedModels } from "./sdk-models.js";
 
 describe("fetchClaudeCodeModels", () => {
@@ -31,11 +34,16 @@ describe("fetchClaudeCodeModels", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
-  it("asks the SDK built-in executable even if the server sets CLAUDE_CODE_EXECUTABLE", async () => {
-    // ACP runs only inherit a closed set of server variables, and this is not one of them, so
-    // listing from that path would offer models the runs cannot execute.
+  it("asks the installed claude, the same one ACP runs use", async () => {
     stubQuery();
-    vi.stubEnv("CLAUDE_CODE_EXECUTABLE", "/opt/claude/claude");
+    installed.resolveInstalledClaude.mockResolvedValue("/installed/claude");
+    await fetchClaudeCodeModels();
+    expect(sdk.query.mock.calls[0]![0].options.pathToClaudeCodeExecutable).toBe("/installed/claude");
+  });
+
+  it("asks the SDK built-in executable when claude is not installed", async () => {
+    stubQuery();
+    installed.resolveInstalledClaude.mockResolvedValue(null);
     await fetchClaudeCodeModels();
     expect(sdk.query.mock.calls[0]![0].options.pathToClaudeCodeExecutable).toBeUndefined();
   });

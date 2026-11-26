@@ -97,12 +97,13 @@ describe("listClaudeModels without ANTHROPIC_API_KEY", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("prefers the models Claude Code reports and does not call the public catalog", async () => {
-    sdkModels.fetchClaudeCodeModels.mockResolvedValue([{ id: "claude-opus-9", label: "Claude Opus 9" }]);
+  it("shows exactly what Claude Code reports, ordered, without the fixed list or the catalog", async () => {
+    sdkModels.fetchClaudeCodeModels.mockResolvedValue([
+      { id: "claude-sonnet-9", label: "Claude Sonnet 9" },
+      { id: "claude-opus-9", label: "Claude Opus 9" },
+    ]);
     const fetchMock = mockCatalog(catalog);
-    const resultIds = ids(await listClaudeModels());
-    expect(resultIds).toContain("claude-opus-9");
-    expect(resultIds).toContain("claude-fable-5-1");
+    expect(ids(await listClaudeModels())).toEqual(["claude-opus-9", "claude-sonnet-9"]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

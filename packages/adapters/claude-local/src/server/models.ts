@@ -163,9 +163,9 @@ async function fetchPublicCatalogModels(url: string): Promise<AdapterModel[]> {
 let keylessInFlight: Promise<AdapterModel[]> | null = null;
 
 /**
- * Without an API key: ask Claude Code first, then the public catalog, then the fixed list.
- * The result is always merged with the fixed list. Only a Claude Code answer is cached for a
- * day; anything degraded is retried after a few minutes.
+ * Without an API key: ask Claude Code first and show exactly its list. If it gives none, use the
+ * public catalog merged with the fixed list, then the fixed list alone. Only a Claude Code answer
+ * is cached for a day; anything degraded is retried after a few minutes.
  */
 async function loadKeylessModels(forceRefresh: boolean): Promise<AdapterModel[]> {
   const url = resolveCatalogUrl();
@@ -183,7 +183,8 @@ async function loadKeylessModels(forceRefresh: boolean): Promise<AdapterModel[]>
     const previous = catalogCached?.url === url ? catalogCached : null;
 
     const reported = await fetchClaudeCodeModels();
-    if (reported.length > 0) return remember(mergedWithFallback(reported), true);
+    // Exactly what Claude Code reports: a model it does not support is not offered.
+    if (reported.length > 0) return remember(sortClaudeModels(dedupeModels(reported)), true);
     // A Claude Code answer we already have is better than the public catalog.
     if (previous?.fromClaudeCode) {
       catalogCached = { ...previous, expiresAt: Date.now() + KEYLESS_RETRY_TTL_MS };

@@ -1,5 +1,6 @@
 import os from "node:os";
 import type { AdapterModel } from "@paperclipai/adapter-utils";
+import { resolveInstalledClaude } from "./claude-executable.js";
 
 const SDK_MODELS_TIMEOUT_MS = 20_000;
 const DATED_SNAPSHOT_RE = /-\d{8}$/;
@@ -52,6 +53,7 @@ export async function fetchClaudeCodeModels(): Promise<AdapterModel[]> {
     async function* prompt(): AsyncGenerator<never> {
       await idle;
     }
+    const executable = await resolveInstalledClaude();
     query = sdkQuery({
       prompt: prompt(),
       options: {
@@ -60,9 +62,8 @@ export async function fetchClaudeCodeModels(): Promise<AdapterModel[]> {
         settingSources: [],
         strictMcpConfig: true,
         persistSession: false,
-        // No pathToClaudeCodeExecutable: default ACP runs use the SDK built-in executable
-        // (they do not inherit CLAUDE_CODE_EXECUTABLE from the server), and the list must
-        // match what runs can execute.
+        // The same executable ACP runs use; undefined means the SDK built-in one.
+        pathToClaudeCodeExecutable: executable ?? undefined,
       },
     });
     const timeout = new Promise<never>((_, reject) => {
