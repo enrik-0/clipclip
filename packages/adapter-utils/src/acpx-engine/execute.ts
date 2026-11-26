@@ -3,7 +3,7 @@ import { prepareAcpxCodexObservabilityHome } from "../codex-observability-home.j
 import { codexShellEnvironmentKeys } from "../codex-shell-environment.js";
 import { applyObservabilityEnvironment } from "../agent-observability.js";
 import { cancellableSandboxStartup } from "./startup-cancellation.js";
-import { resolveAgentRegistryOverride, resolveWindowsNodeLaunchCommand } from "./agent-command-argv.js";
+import { resolveAgentRegistryOverride } from "./agent-command-argv.js";
 import { emitStartupReuse, environmentStartupReuse, summarizeStartupReuse, type StartupReuseReason } from "../startup-reuse.js";
 import { withAdapterExecutionPhase, type AdapterExecutionPhase } from "../execution-phase.js";
 import fs from "node:fs/promises";
@@ -895,10 +895,6 @@ async function resolveBuiltInAgentCommand(input: {
     return { command: binName, shellCommand: binName };
   }
   const resolved = (await findAncestorBin(packageRootDir, binName)) ?? binName;
-  if (process.platform === "win32") {
-    const nodeCommand = await resolveWindowsNodeLaunchCommand(resolved, binName);
-    if (nodeCommand) return { command: nodeCommand, shellCommand: nodeCommand };
-  }
   return { command: resolved, shellCommand: shellQuote(resolved) };
 }
 
