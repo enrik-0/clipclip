@@ -362,6 +362,7 @@ function startApp({ hidden }) {
 
 handleLaunch({
   argv: process.argv,
+  packaged: app.isPackaged,
   requestLock: () => app.requestSingleInstanceLock(),
   quit: () => app.quit(),
   exit: (code) => app.exit(code),
