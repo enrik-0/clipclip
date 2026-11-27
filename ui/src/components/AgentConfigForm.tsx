@@ -1044,10 +1044,12 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   const connectionModels = useConnectionModels(isExternalRunner ? null : selectedCompanyId, isCreate ? undefined : modelAiBinding, aiRoutingHarness(adapterType, runnerProvider, runnerAcpxAgent));
   // Fetch adapter models for the effective provider, including unsaved changes.
   const modelAdapterType = accountBoundCatalog ? "paperclip_runner" : isRunnerHarness ? harnessType : adapterType;
-  // A saved OpenCode agent's catalog comes from its own command and env, so it
-  // cannot share a cache entry with another agent or with the agent-less list.
-  const modelCacheScope = modelAdapterType === "opencode_local" && !isCreate
-    ? `${modelCacheIdentity ?? ""}:${props.agent.id}`
+  // A saved OpenCode agent's catalog comes from its own command, cwd and env, so
+  // it cannot share a cache entry with another agent, with the agent-less list or
+  // with an earlier version of this configuration.
+  const agentScopedCatalog = modelAdapterType === "opencode_local" && !isCreate;
+  const modelCacheScope = agentScopedCatalog
+    ? `${modelCacheIdentity ?? ""}:${props.agent.id}:${JSON.stringify([config.command, config.cwd, config.env])}`
     : modelCacheIdentity;
   const modelQueryKey = selectedCompanyId
     ? queryKeys.agents.adapterModels(selectedCompanyId, modelAdapterType, currentDefaultEnvironmentId || null, modelCacheScope)
@@ -1072,7 +1074,8 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   }, [accountModelScope, selectedCompanyId, isExternalRunner, connectionModels, refreshConnectionModels]);
   const [refreshModelsError, setRefreshModelsError] = useState<string | null>(null);
   const [refreshingModels, setRefreshingModels] = useState(false);
-  const models = connectionModels?.models ?? fetchedModels ?? externalModels ?? [];
+  // The page's list is fetched without the agent, so it cannot stand in for this one.
+  const models = connectionModels?.models ?? fetchedModels ?? (agentScopedCatalog ? undefined : externalModels) ?? [];
   // `useConnectionModels` owns its own query and exposes only `error`; the
   // adapter-models read is gated on its view below, so a transient refetch
   // failure keeps the cached list without an error line.

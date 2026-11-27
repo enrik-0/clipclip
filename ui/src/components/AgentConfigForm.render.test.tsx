@@ -2031,6 +2031,54 @@ describe("AgentConfigForm environment selector", () => {
     expect(document.body.textContent).not.toContain("only-model");
   });
 
+  it("does not offer the agent-less OpenCode list when the agent's own discovery fails", async () => {
+    mockAgentsApi.adapterModels.mockRejectedValue(new Error("Failed to start command \"missing-opencode\""));
+    mockEnvironmentsApi.list.mockResolvedValue([makeEnvironment({ id: "local-1", name: "Local", driver: "local" })]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => {
+      renderFormView(root, createFormQueryClient(),
+        <AgentConfigForm mode="edit" onSave={vi.fn()} hidePromptTemplate showAdapterTypeField={false}
+          adapterModels={[{ id: "server/default-model", label: "server/default-model" }]}
+          agent={makeAgent({ adapterType: "opencode_local", adapterConfig: { model: "opencode/big-pickle" } })} />);
+    });
+    await vi.waitFor(() => expect(container.textContent).toContain("missing-opencode"));
+    await clickByText(container, "opencode/big-pickle");
+
+    expect(document.body.textContent).not.toContain("default-model");
+  });
+
+  it("drops the previous command's OpenCode models once the saved command changes", async () => {
+    mockAgentsApi.adapterModels
+      .mockResolvedValueOnce([{ id: "previous/command-model", label: "previous/command-model" }])
+      .mockRejectedValue(new Error("Failed to start command \"changed-command\""));
+    mockEnvironmentsApi.list.mockResolvedValue([makeEnvironment({ id: "local-1", name: "Local", driver: "local" })]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    const queryClient = createFormQueryClient();
+    const show = async (command: string) => {
+      await act(async () => {
+        renderFormView(root, queryClient,
+          <AgentConfigForm mode="edit" onSave={vi.fn()} hidePromptTemplate showAdapterTypeField={false}
+            agent={makeAgent({ adapterType: "opencode_local", adapterConfig: { command, model: "opencode/big-pickle" } })} />);
+      });
+      await flushReact();
+    };
+
+    await show("working-command");
+    await vi.waitFor(() => expect(mockAgentsApi.adapterModels).toHaveBeenCalledTimes(1));
+    await flushReact();
+    await show("changed-command");
+    await vi.waitFor(() => expect(container.textContent).toContain("changed-command\""));
+    await clickByText(container, "opencode/big-pickle");
+
+    expect(document.body.textContent).not.toContain("command-model");
+  });
+
   it("moves through model options with the same keyboard controls as the harness picker", async () => {
     const curated = [
       { id: "claude-fable-5-1", label: "Claude Fable 5.1" },
