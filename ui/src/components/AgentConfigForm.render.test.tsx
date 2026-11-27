@@ -2050,6 +2050,26 @@ describe("AgentConfigForm environment selector", () => {
     expect(document.body.textContent).not.toContain("default-model");
   });
 
+  it("keeps the page's list for a Paperclip runner agent on the OpenCode harness", async () => {
+    mockAgentsApi.adapterModels.mockImplementation(() => new Promise(() => {}));
+    mockEnvironmentsApi.list.mockResolvedValue([makeEnvironment({ id: "local-1", name: "Local", driver: "local" })]);
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => {
+      renderFormView(root, createFormQueryClient(),
+        <AgentConfigForm mode="edit" onSave={vi.fn()} hidePromptTemplate showAdapterTypeField={false}
+          adapterModels={[{ id: "runner/page-model", label: "runner/page-model" }]}
+          agent={makeAgent({ adapterType: "paperclip_runner", adapterConfig: { provider: "opencode", model: "opencode/big-pickle" } })} />);
+    });
+    await vi.waitFor(() => expect(mockAgentsApi.adapterModels).toHaveBeenCalledWith(
+      "company-1", "opencode_local", expect.anything()));
+    await clickByText(container, "opencode/big-pickle");
+
+    expect(document.body.textContent).toContain("page-model");
+  });
+
   it("drops the previous command's OpenCode models once the saved command changes", async () => {
     mockAgentsApi.adapterModels
       .mockResolvedValueOnce([{ id: "previous/command-model", label: "previous/command-model" }])

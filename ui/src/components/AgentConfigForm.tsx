@@ -1047,7 +1047,8 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   // A saved OpenCode agent's catalog comes from its own command, cwd and env, so
   // it cannot share a cache entry with another agent, with the agent-less list or
   // with an earlier version of this configuration.
-  const agentScopedCatalog = modelAdapterType === "opencode_local" && !isCreate;
+  // Runner agents on the OpenCode harness get the agent-less list from the server.
+  const agentScopedCatalog = !isCreate && props.agent.adapterType === "opencode_local" && modelAdapterType === "opencode_local";
   const modelCacheScope = agentScopedCatalog
     ? `${modelCacheIdentity ?? ""}:${props.agent.id}:${JSON.stringify([config.command, config.cwd, config.env])}`
     : modelCacheIdentity;
