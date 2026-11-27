@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import os from "node:os";
-import type { AdapterModel } from "@paperclipai/adapter-utils";
+import type { AdapterModel, AdapterModelDiscoveryContext } from "@paperclipai/adapter-utils";
 import {
   asString,
   ensurePathInEnv,
   runChildProcess,
 } from "@paperclipai/adapter-utils/server-utils";
 import { isValidOpenCodeModelId } from "../index.js";
+import { detectOpenCodeCliVersion, openCodeCliUsesBackgroundService } from "./cli-version.js";
 
 const MODELS_CACHE_TTL_MS = 60_000;
 const MODELS_DISCOVERY_TIMEOUT_MS = 20_000;
@@ -249,13 +250,11 @@ async function refreshOpenCodeModelsCached(input: {
   // models.dev cache. Its stdout is a confirmation message, not the refreshed
   // catalog, so enumerate once more after the refresh under the exact same
   // command/cwd/env before deciding whether the configured model exists.
-  await discoverOpenCodeModels({
-    command,
-    cwd,
-    env,
-    refresh: true,
-    standalone,
-  });
+  // OpenCode 2.x (2.3.0) rejects `--refresh` as an unrecognized flag. There,
+  // refreshing means listing again with a private server, past our own cache.
+  if (!standalone) {
+    await discoverOpenCodeModels({ command, cwd, env, refresh: true });
+  }
   const models = await discoverOpenCodeModels({ command, cwd, env, standalone });
   if (models.length > 0) {
     discoveryCache.set(discoveryCacheKey(command, cwd, env, standalone), {
@@ -364,9 +363,58 @@ export async function ensureOpenCodeModelConfiguredAndAvailable(input: {
   return models;
 }
 
-export async function listOpenCodeModels(): Promise<AdapterModel[]> {
+// A spawn failure from runChildProcess appends the whole PATH to its message.
+// Keep the part that tells the user what failed; the PATH is noise in the UI.
+function conciseDiscoveryError(err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  return new Error(message.replace(/\s*Verify adapter command[\s\S]*$/, "").trim() || "`opencode models` failed.");
+}
+
+// The selector follows the same CLI flavor rules as execute(): OpenCode 2.x
+// only honors the run's config when it lists with --standalone.
+async function selectorDiscoveryInput(config: Record<string, unknown>) {
+  const input = { command: config.command, cwd: config.cwd, env: config.env };
+  const version = await detectOpenCodeCliVersion({
+    command: resolveOpenCodeCommand(input.command),
+    cwd: asString(input.cwd, process.cwd()),
+    env: normalizeEnv(ensurePathInEnv({ ...process.env, ...normalizeEnv(input.env) })),
+  });
+  return { ...input, standalone: openCodeCliUsesBackgroundService(version) };
+}
+
+/**
+ * Without a context (e.g. a new agent that has no config yet) discovery uses the
+ * server defaults and failures yield an empty list so callers can fall back to
+ * the static model. With the agent's context, discovery runs with the agent's
+ * command/cwd/env and a failure is thrown so it can be shown to the user.
+ */
+export async function listOpenCodeModels(
+  context?: AdapterModelDiscoveryContext,
+): Promise<AdapterModel[]> {
+  if (context) {
+    const input = await selectorDiscoveryInput(context.config);
+    return discoverOpenCodeModelsCached(input).catch((err) => {
+      throw conciseDiscoveryError(err);
+    });
+  }
   try {
-    return await discoverOpenCodeModelsCached();
+    return await discoverOpenCodeModelsCached(await selectorDiscoveryInput({}));
+  } catch {
+    return [];
+  }
+}
+
+export async function refreshOpenCodeModels(
+  context?: AdapterModelDiscoveryContext,
+): Promise<AdapterModel[]> {
+  if (context) {
+    const input = await selectorDiscoveryInput(context.config);
+    return refreshOpenCodeModelsCached(input).catch((err) => {
+      throw conciseDiscoveryError(err);
+    });
+  }
+  try {
+    return await refreshOpenCodeModelsCached(await selectorDiscoveryInput({}));
   } catch {
     return [];
   }

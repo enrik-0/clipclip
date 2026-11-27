@@ -1044,8 +1044,16 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   const connectionModels = useConnectionModels(isExternalRunner ? null : selectedCompanyId, isCreate ? undefined : modelAiBinding, aiRoutingHarness(adapterType, runnerProvider, runnerAcpxAgent));
   // Fetch adapter models for the effective provider, including unsaved changes.
   const modelAdapterType = accountBoundCatalog ? "paperclip_runner" : isRunnerHarness ? harnessType : adapterType;
+  // A saved OpenCode agent's catalog comes from its own command, cwd and env, so
+  // it cannot share a cache entry with another agent, with the agent-less list or
+  // with an earlier version of this configuration.
+  // Runner agents on the OpenCode harness get the agent-less list from the server.
+  const agentScopedCatalog = !isCreate && props.agent.adapterType === "opencode_local" && modelAdapterType === "opencode_local";
+  const modelCacheScope = agentScopedCatalog
+    ? `${modelCacheIdentity ?? ""}:${props.agent.id}:${JSON.stringify([config.command, config.cwd, config.env])}`
+    : modelCacheIdentity;
   const modelQueryKey = selectedCompanyId
-    ? queryKeys.agents.adapterModels(selectedCompanyId, modelAdapterType, currentDefaultEnvironmentId || null, modelCacheIdentity)
+    ? queryKeys.agents.adapterModels(selectedCompanyId, modelAdapterType, currentDefaultEnvironmentId || null, modelCacheScope)
     : ["agents", "none", "adapter-models", adapterType];
   const fetchedModelsQuery = useQuery({
     queryKey: modelQueryKey,
@@ -1067,7 +1075,8 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
   }, [accountModelScope, selectedCompanyId, isExternalRunner, connectionModels, refreshConnectionModels]);
   const [refreshModelsError, setRefreshModelsError] = useState<string | null>(null);
   const [refreshingModels, setRefreshingModels] = useState(false);
-  const models = connectionModels?.models ?? fetchedModels ?? externalModels ?? [];
+  // The page's list is fetched without the agent, so it cannot stand in for this one.
+  const models = connectionModels?.models ?? fetchedModels ?? (agentScopedCatalog ? undefined : externalModels) ?? [];
   // `useConnectionModels` owns its own query and exposes only `error`; the
   // adapter-models read is gated on its view below, so a transient refetch
   // failure keeps the cached list without an error line.
@@ -1432,7 +1441,7 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
     setRefreshingModels(true);
     setRefreshModelsError(null);
     try {
-      const refreshed = await agentsApi.adapterModels(selectedCompanyId, modelAdapterType, { refresh: true, environmentId: currentDefaultEnvironmentId || null, provider: modelProvider, ...(runnerAcpxAgent ? { acpxAgent: runnerAcpxAgent } : {}), ...(accountBoundCatalog ? { aiConnection: modelAiBinding, agentId: !isCreate ? props.agent.id : undefined } : {}) });
+      const refreshed = await agentsApi.adapterModels(selectedCompanyId, modelAdapterType, { refresh: true, environmentId: currentDefaultEnvironmentId || null, provider: modelProvider, ...(runnerAcpxAgent ? { acpxAgent: runnerAcpxAgent } : {}), ...(accountBoundCatalog ? { aiConnection: modelAiBinding } : {}), agentId: isCreate ? undefined : props.agent.id });
       queryClient.setQueryData(modelQueryKey, refreshed);
     } catch (error) {
       setRefreshModelsError(describeError(error).body);

@@ -13,6 +13,7 @@ vi.mock("acpx/runtime", () => ({
 
 const mockAccessService = vi.hoisted(() => ({
   canUser: vi.fn(),
+  decide: vi.fn(),
   hasPermission: vi.fn(),
   ensureMembership: vi.fn(),
   setPrincipalPermission: vi.fn(),
@@ -31,6 +32,10 @@ const mockEnvironmentService = vi.hoisted(() => ({
   getById: vi.fn(),
 }));
 const mockListOpenCodeModels = vi.hoisted(() => vi.fn());
+const mockRefreshOpenCodeModels = vi.hoisted(() => vi.fn());
+const mockAgentService = vi.hoisted(() => ({
+  getById: vi.fn(),
+}));
 
 const mockAgentInstructionsService = vi.hoisted(() => ({
   materializeManagedBundle: vi.fn(),
@@ -72,11 +77,12 @@ function registerModuleMocks() {
     return {
       ...actual,
       listOpenCodeModels: mockListOpenCodeModels,
+      refreshOpenCodeModels: mockRefreshOpenCodeModels,
     };
   });
 
   vi.doMock("../services/index.js", () => ({
-    agentService: () => ({}),
+    agentService: () => mockAgentService,
     agentInstructionsService: () => mockAgentInstructionsService,
     accessService: () => mockAccessService,
     approvalService: () => mockApprovalService,
@@ -91,6 +97,11 @@ function registerModuleMocks() {
     syncInstructionsBundleConfigFromFilePath: vi.fn((_agent, config) => config),
     workspaceOperationService: () => ({}),
   }));
+
+  vi.doMock("../services/secrets.js", async () => {
+    const actual = await vi.importActual<typeof import("../services/secrets.js")>("../services/secrets.js");
+    return { ...actual, secretService: () => mockSecretService };
+  });
 
   vi.doMock("../services/instance-settings.js", () => ({
     instanceSettingsService: () => mockInstanceSettingsService,
@@ -165,6 +176,7 @@ describe("adapter model refresh route", () => {
     mockCompanySkillService.listRuntimeSkillEntries.mockResolvedValue([]);
     mockCompanySkillService.resolveRequestedSkillKeys.mockResolvedValue([]);
     mockAccessService.canUser.mockResolvedValue(true);
+    mockAccessService.decide.mockResolvedValue({ allowed: true });
     mockAccessService.hasPermission.mockResolvedValue(true);
     mockAccessService.ensureMembership.mockResolvedValue(undefined);
     mockAccessService.setPrincipalPermission.mockResolvedValue(undefined);
@@ -173,6 +185,10 @@ describe("adapter model refresh route", () => {
     mockEnvironmentService.getById.mockResolvedValue(null);
     mockListOpenCodeModels.mockReset();
     mockListOpenCodeModels.mockResolvedValue([{ id: "dynamic-opencode-model", label: "dynamic-opencode-model" }]);
+    mockRefreshOpenCodeModels.mockReset();
+    mockRefreshOpenCodeModels.mockResolvedValue([{ id: "refreshed-opencode-model", label: "refreshed-opencode-model" }]);
+    mockAgentService.getById.mockReset();
+    mockSecretService.resolveAdapterConfigForRuntime.mockClear();
     await unregisterTestAdapter(refreshableAdapterType);
   });
 
@@ -272,5 +288,86 @@ describe("adapter model refresh route", () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body).toEqual([{ id: "dynamic-opencode-model", label: "dynamic-opencode-model" }]);
     expect(mockListOpenCodeModels).toHaveBeenCalledTimes(1);
+  });
+
+  describe("opencode_local with agentId", () => {
+    const agent = {
+      id: "agent-1",
+      companyId: "company-1",
+      adapterType: "opencode_local",
+      adapterConfig: { command: "/agent/opencode", cwd: "/agent/cwd", env: { OPENAI_API_KEY: { type: "secret_ref" } } },
+    };
+    const resolvedConfig = { command: "/agent/opencode", cwd: "/agent/cwd", env: { OPENAI_API_KEY: "resolved-key" } };
+
+    beforeEach(() => {
+      mockAgentService.getById.mockResolvedValue(agent);
+      mockSecretService.resolveAdapterConfigForRuntime.mockResolvedValue({ config: resolvedConfig });
+    });
+
+    it("discovers models with the agent's resolved config", async () => {
+      const app = await createApp();
+      const res = await requestApp(app, (baseUrl) =>
+        request(baseUrl).get("/api/companies/company-1/adapters/opencode_local/models?agentId=agent-1"),
+      );
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(mockSecretService.resolveAdapterConfigForRuntime).toHaveBeenCalledWith(
+        "company-1",
+        agent.adapterConfig,
+        expect.anything(),
+        expect.objectContaining({ adapterType: "opencode_local" }),
+      );
+      expect(mockListOpenCodeModels).toHaveBeenCalledWith({ config: resolvedConfig });
+    });
+
+    it("answers 422 with the discovery error instead of the static fallback model", async () => {
+      mockListOpenCodeModels.mockRejectedValue(new Error("`opencode models` failed: provider auth missing"));
+
+      const app = await createApp();
+      const res = await requestApp(app, (baseUrl) =>
+        request(baseUrl).get("/api/companies/company-1/adapters/opencode_local/models?agentId=agent-1"),
+      );
+
+      expect(res.status, JSON.stringify(res.body)).toBe(422);
+      expect(res.body.error).toContain("provider auth missing");
+    });
+
+    it("refresh=1 calls the adapter refresh with the agent's resolved config", async () => {
+      const app = await createApp();
+      const res = await requestApp(app, (baseUrl) =>
+        request(baseUrl).get("/api/companies/company-1/adapters/opencode_local/models?agentId=agent-1&refresh=1"),
+      );
+
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toEqual([{ id: "refreshed-opencode-model", label: "refreshed-opencode-model" }]);
+      expect(mockRefreshOpenCodeModels).toHaveBeenCalledWith({ config: resolvedConfig });
+      expect(mockListOpenCodeModels).not.toHaveBeenCalled();
+    });
+
+    it("does not resolve secrets when the actor may not update the agent", async () => {
+      mockAccessService.decide.mockResolvedValue({ allowed: false, explanation: "no permission" });
+
+      const app = await createApp();
+      const res = await requestApp(app, (baseUrl) =>
+        request(baseUrl).get("/api/companies/company-1/adapters/opencode_local/models?agentId=agent-1"),
+      );
+
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(mockSecretService.resolveAdapterConfigForRuntime).not.toHaveBeenCalled();
+      expect(mockListOpenCodeModels).not.toHaveBeenCalled();
+    });
+
+    it("does not read another company's agent", async () => {
+      mockAgentService.getById.mockResolvedValue({ ...agent, companyId: "company-2" });
+
+      const app = await createApp();
+      const res = await requestApp(app, (baseUrl) =>
+        request(baseUrl).get("/api/companies/company-1/adapters/opencode_local/models?agentId=agent-1"),
+      );
+
+      expect(res.status, JSON.stringify(res.body)).toBe(404);
+      expect(mockSecretService.resolveAdapterConfigForRuntime).not.toHaveBeenCalled();
+      expect(mockListOpenCodeModels).not.toHaveBeenCalled();
+    });
   });
 });
