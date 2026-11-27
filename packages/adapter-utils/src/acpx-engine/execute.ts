@@ -3,6 +3,7 @@ import { prepareAcpxCodexObservabilityHome } from "../codex-observability-home.j
 import { codexShellEnvironmentKeys } from "../codex-shell-environment.js";
 import { applyObservabilityEnvironment } from "../agent-observability.js";
 import { cancellableSandboxStartup } from "./startup-cancellation.js";
+import { resolveAgentRegistryOverride, resolveWindowsNodeLaunchCommand } from "./agent-command-argv.js";
 import { emitStartupReuse, environmentStartupReuse, summarizeStartupReuse, type StartupReuseReason } from "../startup-reuse.js";
 import { withAdapterExecutionPhase, type AdapterExecutionPhase } from "../execution-phase.js";
 import fs from "node:fs/promises";
@@ -94,6 +95,7 @@ import {
 } from "@paperclipai/adapter-utils/server-utils";
 import { shellQuote } from "@paperclipai/adapter-utils/ssh";
 import { createEphemeralSessionEnvironmentStore } from "./ephemeral-session-environment.js";
+import { discardWithoutRelaunch } from "./discard-without-relaunch.js";
 import {
   createAcpRuntime,
   createAgentRegistry,
@@ -483,6 +485,9 @@ interface AcpxPreparedRuntime {
   fingerprint: string;
   agentCommand: string | null;
   agentRegistry: AcpAgentRegistry;
+  // True when a process started without the session environment would not run
+  // as the agent, so ACPX must not start one on its own.
+  launchNeedsSessionEnv: boolean;
   processSessionBridge: AdapterExecutionTargetProcessSessionBridgeHandle | null;
   paperclipBridge: AdapterExecutionTargetPaperclipBridgeHandle | null;
   // The workspace/runtime staged into a runner-backed remote sandbox (null for
@@ -872,6 +877,8 @@ export async function findAncestorBin(startDir: string, binName: string): Promis
 interface BuiltInAgentCommand {
   command: string;
   shellCommand: string;
+  /** Extra launch env the command needs on this host. */
+  env?: Record<string, string>;
 }
 
 async function resolveBuiltInAgentCommand(input: {
@@ -894,6 +901,20 @@ async function resolveBuiltInAgentCommand(input: {
     return { command: binName, shellCommand: binName };
   }
   const resolved = (await findAncestorBin(packageRootDir, binName)) ?? binName;
+  if (process.platform === "win32") {
+    const nodeCommand = await resolveWindowsNodeLaunchCommand(resolved, binName);
+    if (nodeCommand) {
+      // In the packaged desktop app `process.execPath` is the app itself. The
+      // child env is allowlisted, so pass the Node-mode switch explicitly or it
+      // starts a second app instead of running the script.
+      const nodeMode = process.env.ELECTRON_RUN_AS_NODE;
+      return {
+        command: nodeCommand,
+        shellCommand: nodeCommand,
+        ...(nodeMode ? { env: { ELECTRON_RUN_AS_NODE: nodeMode } } : {}),
+      };
+    }
+  }
   return { command: resolved, shellCommand: shellQuote(resolved) };
 }
 
@@ -2228,6 +2249,8 @@ async function buildRuntime(input: {
     packageRootDir: input.engine.packageRootDir,
     executionTargetIsRemote,
   });
+  const launchNeedsSessionEnv = !configuredCommand && Boolean(builtInCommand?.env);
+  if (launchNeedsSessionEnv) Object.assign(env, builtInCommand?.env);
   let agentCommand = configuredCommand || builtInCommand?.command || null;
   let agentCommandShell = configuredCommand || builtInCommand?.shellCommand || "";
   // A runner-backed remote sandbox is the only lane that crosses the staging
@@ -2660,8 +2683,11 @@ async function buildRuntime(input: {
     ? [process.execPath, processSessionBridge.agentCommand]
       .map((part) => JSON.stringify(part.replaceAll("\\", "/"))).join(" ")
     : agentCommand;
-  const overrides = overrideCommand ? { [acpxAgent]: overrideCommand } : undefined;
-  const agentRegistry = createAgentRegistry({ overrides });
+  const registryOverride = resolveAgentRegistryOverride(overrideCommand);
+  const overrides = registryOverride ? { [acpxAgent]: registryOverride } : undefined;
+  // acpx 0.12 typings only list string overrides; 0.13+ accepts argv arrays
+  // (see resolveAgentRegistryOverride, which only emits one when supported).
+  const agentRegistry = createAgentRegistry({ overrides: overrides as Record<string, string> | undefined });
   const loggedEnv = buildInvocationEnvForLogs(env, {
     runtimeEnv,
     includeRuntimeKeys: ["HOME"],
@@ -2698,6 +2724,7 @@ async function buildRuntime(input: {
     fingerprint,
     agentCommand,
     agentRegistry,
+    launchNeedsSessionEnv,
     processSessionBridge,
     paperclipBridge,
     stagedRuntime,
@@ -4572,6 +4599,7 @@ export function createAcpxEngineExecutor(deps: AcpxEngineExecutorOptions = {}) {
         } else {
           const createRuntimeStart = now();
           runtime = createRuntime(runtimeOptions);
+          if (prepared.launchNeedsSessionEnv) runtime = discardWithoutRelaunch(runtime, runtimeStore);
           createRuntimeMs = now() - createRuntimeStart;
           // The create_runtime phase runs only on a cold start.
           await emitRunPhaseTiming(ctx, "create_runtime", createRuntimeMs, "ok");

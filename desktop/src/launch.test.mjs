@@ -57,3 +57,27 @@ test("the running instance quits for a --quit launch and shows itself otherwise"
   assert.equal(secondInstanceAction(["electron", "."]), "show");
   assert.equal(secondInstanceAction(["electron", ".", "--hidden"]), "show");
 });
+
+// A packaged executable that gets a script lost `ELECTRON_RUN_AS_NODE` on the
+// way. Starting the app instead would open it on the user's default profile.
+test("a packaged launch with a script argument exits without starting the app", () => {
+  const exe = "C:\\Programs\\Paperclip Desktop\\Paperclip Desktop.exe";
+  for (const script of ["C:\\runtime\\node_modules\\agent\\dist\\index.js", "/opt/runtime/probe.mjs", "tool.cjs"]) {
+    const { calls, deps } = recorder({ hasLock: true });
+    assert.equal(handleLaunch({ argv: [exe, script, "--flag"], packaged: true, ...deps }), "refuse");
+    assert.deepEqual(calls, ["exit:1"]);
+  }
+});
+
+test("a packaged launch with only switches starts the app", () => {
+  const { calls, deps } = recorder({ hasLock: true });
+  const argv = ["Paperclip Desktop.exe", "--hidden", "--user-data-dir=C:\\data\\profile.js"];
+  assert.equal(handleLaunch({ argv, packaged: true, ...deps }), "start");
+  assert.deepEqual(calls, ["lock", 'start:{"hidden":true}']);
+});
+
+test("an unpackaged launch may name its entry script", () => {
+  const { calls, deps } = recorder({ hasLock: true });
+  assert.equal(handleLaunch({ argv: ["electron", "src/main.mjs"], packaged: false, ...deps }), "start");
+  assert.deepEqual(calls, ["lock", 'start:{"hidden":false}']);
+});

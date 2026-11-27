@@ -65,6 +65,9 @@ En Windows, `pnpm build` de la raíz necesita Git Bash como shell de scripts
   "Salir" en el icono de la bandeja o ejecuta `pnpm start -- --quit`. Un proceso lanzado con `--quit` nunca arranca la
   app: si no hay ninguna instancia en marcha, termina enseguida con el código 2.
 - **Instancia única.** Lanzarla otra vez trae la ventana existente al frente.
+- **Scripts.** Si la app instalada recibe un script (`.js`, `.mjs` o `.cjs`) sin `ELECTRON_RUN_AS_NODE`, termina con el
+  código 1 sin arrancar. Ese proceso quería usar el ejecutable como Node y perdió la variable; arrancar la app abriría
+  el perfil por defecto del usuario.
 - **Iniciar con Windows.** Opción del menú de la bandeja; arranca oculta (`--hidden`).
 - **Enlaces externos** se abren en el navegador del sistema.
 - **UI.** Si existe `ui/dist` (o `server/ui-dist`) se sirve esa compilación; si no, se activa el middleware de Vite
