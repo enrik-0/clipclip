@@ -191,6 +191,8 @@ async function runExecutor(
     prepareRemoteManagedHome?: AcpxEngineExecutorOptions["prepareRemoteManagedHome"];
     startupTraceContext?: AdapterExecutionContext["startupTraceContext"];
     packageRootDir?: string;
+    runtimeOverrides?: (runtimeOptions: AcpRuntimeOptions) => Record<string, unknown>;
+    expectedExitCode?: number;
   } = {},
 ) {
   // Skill reconciliation must never inspect or modify the developer's real
@@ -208,6 +210,7 @@ async function runExecutor(
   const logs: Array<{ stream: string; text: string }> = [];
   const events: Array<{ eventType: string; payload?: Record<string, unknown> }> = [];
   const receipts: unknown[] = [];
+  const overrides = options.runtimeOverrides;
   const execute = createAcpxEngineExecutor({
     ...(options.prepareRemoteManagedHome
       ? { prepareRemoteManagedHome: options.prepareRemoteManagedHome }
@@ -215,11 +218,14 @@ async function runExecutor(
     ...(options.packageRootDir ? { packageRootDir: options.packageRootDir } : {}),
     createRuntime: (options) => {
       runtimeOptions.push(options as unknown as Record<string, unknown>);
-      return buildRuntime(
-        ({ key, value }) => configOptions.push({ key, value }),
-        (input) => sessionInputs.push(input),
-        (input) => turnInputs.push(input),
-      ) as never;
+      return {
+        ...buildRuntime(
+          ({ key, value }) => configOptions.push({ key, value }),
+          (input) => sessionInputs.push(input),
+          (input) => turnInputs.push(input),
+        ),
+        ...overrides?.(options),
+      } as never;
     },
   });
 
@@ -251,7 +257,7 @@ async function runExecutor(
     onUsage: async (receipt: unknown) => { receipts.push(receipt); },
   } as never);
 
-  expect(result.exitCode).toBe(0);
+  expect(result.exitCode).toBe(options.expectedExitCode ?? 0);
   return { logs, meta, events, receipts, runtimeOptions, configOptions, sessionInputs, turnInputs, result };
 }
 
@@ -9141,6 +9147,20 @@ describe("ACPX startup handshake guard and late-completion fence", () => {
 describe("built-in agent launch inside the packaged desktop app", () => {
   afterEach(() => vi.unstubAllEnvs());
 
+  async function makePackagedInstall() {
+    const root = await makeTempRoot();
+    const install = path.join(root, "Paperclip Desktop");
+    const packageDir = path.join(install, "node_modules", "@agentclientprotocol", "claude-agent-acp");
+    const script = path.join(packageDir, "dist", "index.js");
+    await fs.mkdir(path.dirname(script), { recursive: true });
+    await fs.mkdir(path.join(install, "node_modules", ".bin"), { recursive: true });
+    await fs.writeFile(path.join(install, "node_modules", ".bin", "claude-agent-acp.cmd"), "");
+    await fs.writeFile(script, "");
+    await fs.writeFile(path.join(packageDir, "package.json"), JSON.stringify({ bin: { "claude-agent-acp": "dist/index.js" } }));
+    vi.stubEnv("PAPERCLIP_HOME", path.join(root, "home"));
+    return { install, script, config: { agent: "claude", cwd: root, stateDir: path.join(root, "state") } };
+  }
+
   // The desktop app runs the server with its own executable in Node mode. The
   // agent child only gets an allowlisted env, so without the switch it would
   // start a second desktop app instead of Node.
@@ -9148,21 +9168,9 @@ describe("built-in agent launch inside the packaged desktop app", () => {
     "runs the package script with the current runtime and keeps it in Node mode",
     async () => {
       vi.stubEnv("ELECTRON_RUN_AS_NODE", "1");
-      const root = await makeTempRoot();
-      const install = path.join(root, "Paperclip Desktop");
-      const packageDir = path.join(install, "node_modules", "@agentclientprotocol", "claude-agent-acp");
-      const script = path.join(packageDir, "dist", "index.js");
-      await fs.mkdir(path.dirname(script), { recursive: true });
-      await fs.mkdir(path.join(install, "node_modules", ".bin"), { recursive: true });
-      await fs.writeFile(path.join(install, "node_modules", ".bin", "claude-agent-acp.cmd"), "");
-      await fs.writeFile(script, "");
-      await fs.writeFile(path.join(packageDir, "package.json"), JSON.stringify({ bin: { "claude-agent-acp": "dist/index.js" } }));
-      vi.stubEnv("PAPERCLIP_HOME", path.join(root, "home"));
+      const { install, script, config } = await makePackagedInstall();
 
-      const run = await runExecutor(
-        { agent: "claude", cwd: root, stateDir: path.join(root, "state") },
-        { packageRootDir: install },
-      );
+      const run = await runExecutor(config, { packageRootDir: install });
 
       const env = (run.sessionInputs[0]!.sessionOptions as { env: Record<string, string> }).env;
       expect(env.ELECTRON_RUN_AS_NODE).toBe("1");
@@ -9170,4 +9178,52 @@ describe("built-in agent launch inside the packaged desktop app", () => {
       expect(String(registry.resolve("claude"))).toContain(script.replaceAll("\\", "/"));
     },
   );
+
+  // ACPX builds the client of a discard-close without the session environment.
+  // In the desktop app that client would start a second app on the default
+  // profile, so the engine has to reset the stored session itself.
+  it.runIf(process.platform === "win32").each([
+    { runtime: "the desktop app", nodeMode: "1", acpxDiscards: false },
+    { runtime: "plain Node", nodeMode: "", acpxDiscards: true },
+  ])("discards an unavailable session under $runtime", async ({ nodeMode, acpxDiscards }) => {
+    vi.stubEnv("ELECTRON_RUN_AS_NODE", nodeMode);
+    const { install, config } = await makePackagedInstall();
+    const closes: Array<{ discardPersistentState?: boolean }> = [];
+    const saved: AcpSessionRecord[] = [];
+
+    await runExecutor(config, {
+      packageRootDir: install,
+      expectedExitCode: 1,
+      runtimeOverrides: ({ sessionStore }) => {
+        const load = sessionStore.load.bind(sessionStore);
+        sessionStore.load = async (id) =>
+          id === "record-1" ? ({ acpxRecordId: id, acpx: {} } as unknown as AcpSessionRecord) : load(id);
+        sessionStore.save = async (record) => {
+          saved.push(record);
+        };
+        return {
+          ensureSession: async () => ({
+            acpxRecordId: "record-1",
+            backendSessionId: "backend-session",
+            agentSessionId: "agent-session",
+            runtimeSessionName: "runtime-session",
+          }),
+          startTurn: () => ({
+            events: (async function* () {})(),
+            result: Promise.resolve({
+              status: "failed",
+              error: { message: "session could not be resumed", detailCode: "SESSION_RESUME_REQUIRED" },
+            }),
+            cancel: async () => {},
+          }),
+          close: async (input: { discardPersistentState?: boolean }) => {
+            closes.push(input);
+          },
+        };
+      },
+    });
+
+    expect(closes.map((input) => input.discardPersistentState)).toEqual([acpxDiscards]);
+    expect(saved.map((record) => record.acpx?.reset_on_next_ensure)).toEqual(acpxDiscards ? [] : [true]);
+  });
 });

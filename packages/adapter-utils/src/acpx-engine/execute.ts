@@ -95,6 +95,7 @@ import {
 } from "@paperclipai/adapter-utils/server-utils";
 import { shellQuote } from "@paperclipai/adapter-utils/ssh";
 import { createEphemeralSessionEnvironmentStore } from "./ephemeral-session-environment.js";
+import { discardWithoutRelaunch } from "./discard-without-relaunch.js";
 import {
   createAcpRuntime,
   createAgentRegistry,
@@ -484,6 +485,9 @@ interface AcpxPreparedRuntime {
   fingerprint: string;
   agentCommand: string | null;
   agentRegistry: AcpAgentRegistry;
+  // True when a process started without the session environment would not run
+  // as the agent, so ACPX must not start one on its own.
+  launchNeedsSessionEnv: boolean;
   processSessionBridge: AdapterExecutionTargetProcessSessionBridgeHandle | null;
   paperclipBridge: AdapterExecutionTargetPaperclipBridgeHandle | null;
   // The workspace/runtime staged into a runner-backed remote sandbox (null for
@@ -2245,7 +2249,8 @@ async function buildRuntime(input: {
     packageRootDir: input.engine.packageRootDir,
     executionTargetIsRemote,
   });
-  if (!configuredCommand && builtInCommand?.env) Object.assign(env, builtInCommand.env);
+  const launchNeedsSessionEnv = !configuredCommand && Boolean(builtInCommand?.env);
+  if (launchNeedsSessionEnv) Object.assign(env, builtInCommand?.env);
   let agentCommand = configuredCommand || builtInCommand?.command || null;
   let agentCommandShell = configuredCommand || builtInCommand?.shellCommand || "";
   // A runner-backed remote sandbox is the only lane that crosses the staging
@@ -2719,6 +2724,7 @@ async function buildRuntime(input: {
     fingerprint,
     agentCommand,
     agentRegistry,
+    launchNeedsSessionEnv,
     processSessionBridge,
     paperclipBridge,
     stagedRuntime,
@@ -4593,6 +4599,7 @@ export function createAcpxEngineExecutor(deps: AcpxEngineExecutorOptions = {}) {
         } else {
           const createRuntimeStart = now();
           runtime = createRuntime(runtimeOptions);
+          if (prepared.launchNeedsSessionEnv) runtime = discardWithoutRelaunch(runtime, runtimeStore);
           createRuntimeMs = now() - createRuntimeStart;
           // The create_runtime phase runs only on a cold start.
           await emitRunPhaseTiming(ctx, "create_runtime", createRuntimeMs, "ok");
